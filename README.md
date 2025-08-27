@@ -1,8 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mythayun Live Scores Frontend
+
+A mobile-optimized Progressive Web App (PWA) for real-time football scores and match updates. This application serves as the frontend for the Mythayun backend API, providing a responsive and intuitive interface for accessing live match data, stadium guides, and personalized follow features.
+
+## Features
+
+- **Mobile-First Design**: Optimized for mobile devices with intuitive touch interactions
+- **PWA Capabilities**: Works offline, installable on home screen, push notifications
+- **Live Match Updates**: Real-time score updates and match events
+- **Team & League Following**: Personalized experience with favorite teams and leagues
+- **Stadium Guides**: Access venue information and guides for match attendance
+- **Authentication**: Secure user registration and login with token-based auth
+- **Admin Interface**: Management dashboard for authorized users
+
+## Tech Stack
+
+- **Framework**: Next.js 15 with App Router
+- **Language**: TypeScript
+- **Styling**: TailwindCSS 4
+- **State Management**: Zustand
+- **Data Fetching**: TanStack React Query
+- **Authentication**: JWT with secure token refresh
+- **PWA**: next-pwa for service worker and offline support
+
+## Project Structure
+
+```
+mythayun-frontend/
+├── app/               # Next.js 15 App Router pages
+│   ├── auth/          # Authentication routes
+│   ├── matches/       # Match listing and details
+│   ├── follows/       # User follows management
+│   ├── stadiums/      # Stadium guides
+│   └── admin/         # Admin dashboard
+├── components/        # React components
+│   ├── ui/            # UI components (buttons, inputs, etc)
+│   ├── layout/        # Layout components
+│   ├── matches/       # Match-specific components
+│   └── follows/       # Follow-specific components
+├── lib/               # Shared utilities
+│   ├── api/           # API client and endpoints
+│   ├── hooks/         # Custom React hooks
+│   ├── utils/         # Utility functions
+│   └── store/         # Zustand stores
+├── public/            # Static assets
+│   ├── icons/         # App icons for PWA
+│   └── manifest.json  # PWA manifest
+└── styles/            # Global styles
+```
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 18+ (LTS recommended)
+- Backend API running (see Mythayun backend repository)
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies
+
+```bash
+npm install
+# or
+yarn
+# or
+pnpm install
+```
+
+3. Create a `.env.local` file with the following variables:
+
+```
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3333
+```
+
+### Development
+
+Start the development server:
 
 ```bash
 npm run dev
@@ -10,27 +84,47 @@ npm run dev
 yarn dev
 # or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Building for Production
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+# or
+yarn build
+yarn start
+```
 
-## Learn More
+## Mobile Optimization
 
-To learn more about Next.js, take a look at the following resources:
+This application is designed with a mobile-first approach, featuring:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Bottom navigation bar for easy thumb access
+- Optimized touch targets (minimum 44px)
+- Safe area insets for notched devices
+- Responsive font sizes and spacing
+- Hardware-accelerated animations
+- Offline support via service worker
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Authentication Flow
 
-## Deploy on Vercel
+The application uses a token-based authentication system with JWT:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. User registers or logs in via `/auth/login` or `/auth/register`
+2. Backend returns access and refresh tokens
+3. Tokens are securely stored in localStorage
+4. API requests include Authorization header
+5. Token refresh is handled automatically on 401 responses
+6. User state is managed via Zustand store
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## API Integration
+
+The frontend communicates with the Mythayun backend API using a custom client with:
+
+- Automatic token handling
+- Request/response interceptors
+- Error handling
+- TypeScript typing
