@@ -99,17 +99,17 @@ export default function MatchCard({ match }: MatchCardProps) {
               {homeTeam.logo ? (
                 <img 
                   src={homeTeam.logo} 
-                  alt={`${homeTeam.name} logo`} 
+                  alt={`${homeTeam.name || 'Home Team'} logo`} 
                   className="h-8 w-8 object-contain"
                 />
               ) : (
                 <span className="text-xl font-bold text-gray-400">
-                  {homeTeam.name.charAt(0)}
+                  {homeTeam.name?.charAt(0) || 'H'}
                 </span>
               )}
             </div>
             <span className="text-sm font-medium text-gray-900 text-center line-clamp-1">
-              {homeTeam.name}
+              {homeTeam.name || 'Home Team'}
             </span>
           </div>
           
@@ -130,17 +130,17 @@ export default function MatchCard({ match }: MatchCardProps) {
               {awayTeam.logo ? (
                 <img 
                   src={awayTeam.logo} 
-                  alt={`${awayTeam.name} logo`} 
+                  alt={`${awayTeam.name || 'Away Team'} logo`} 
                   className="h-8 w-8 object-contain"
                 />
               ) : (
                 <span className="text-xl font-bold text-gray-400">
-                  {awayTeam.name.charAt(0)}
+                  {awayTeam.name?.charAt(0) || 'A'}
                 </span>
               )}
             </div>
             <span className="text-sm font-medium text-gray-900 text-center line-clamp-1">
-              {awayTeam.name}
+              {awayTeam.name || 'Away Team'}
             </span>
           </div>
         </div>

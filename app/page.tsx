@@ -9,66 +9,46 @@ import MatchCard, { MatchData } from '@/components/matches/match-card';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useMatchesStore } from '@/lib/store/matches-store';
+import { useAuthStore } from '@/lib/store/auth-store';
 // Using simple elements instead of icons to avoid import issues
-
-// Mock data for matches
-const mockMatches: MatchData[] = [
-  {
-    id: '1',
-    homeTeam: { id: '101', name: 'Arsenal', score: 2 },
-    awayTeam: { id: '102', name: 'Chelsea', score: 1 },
-    status: 'live',
-    kickoff: new Date().toISOString(),
-    venue: 'Emirates Stadium',
-    minute: 76,
-    isFollowed: true
-  },
-  {
-    id: '2',
-    homeTeam: { id: '103', name: 'Liverpool', score: 0 },
-    awayTeam: { id: '104', name: 'Manchester City', score: 0 },
-    status: 'upcoming',
-    kickoff: new Date(Date.now() + 3600000).toISOString(),
-    venue: 'Anfield',
-    isFollowed: false
-  },
-  {
-    id: '3',
-    homeTeam: { id: '105', name: 'Manchester United', score: 1 },
-    awayTeam: { id: '106', name: 'Tottenham', score: 3 },
-    status: 'finished',
-    kickoff: new Date(Date.now() - 3600000).toISOString(),
-    venue: 'Old Trafford',
-    isFollowed: true
-  },
-  {
-    id: '4',
-    homeTeam: { id: '107', name: 'Leicester City', score: 2 },
-    awayTeam: { id: '108', name: 'West Ham', score: 2 },
-    status: 'finished',
-    kickoff: new Date(Date.now() - 7200000).toISOString(),
-    venue: 'King Power Stadium',
-    isFollowed: false
-  },
-  {
-    id: '5',
-    homeTeam: { id: '109', name: 'Everton', score: 0 },
-    awayTeam: { id: '110', name: 'Newcastle', score: 0 },
-    status: 'upcoming',
-    kickoff: new Date(Date.now() + 7200000).toISOString(),
-    venue: 'Goodison Park',
-    isFollowed: false
-  }
-];
 
 // Filter types for matches
 type FilterType = 'all' | 'live' | 'upcoming' | 'finished' | 'followed';
+
+// Helper function to convert Match to MatchData for UI components
+const convertMatchToMatchData = (match: any): MatchData => {
+  return {
+    id: match.id,
+    homeTeam: {
+      id: match.homeTeamId || match.id + '_home',
+      name: match.homeTeam || 'Home Team',
+      score: match.homeScore || undefined,
+      logo: undefined // Will be handled by MatchCard fallback
+    },
+    awayTeam: {
+      id: match.awayTeamId || match.id + '_away', 
+      name: match.awayTeam || 'Away Team',
+      score: match.awayScore || undefined,
+      logo: undefined // Will be handled by MatchCard fallback
+    },
+    status: match.status,
+    kickoff: match.time || new Date().toISOString(), // Map time to kickoff
+    venue: match.venue,
+    minute: match.minute,
+    isFollowed: false // Default value, can be enhanced later
+  };
+};
 
 export default function Home() {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [isLoaded, setIsLoaded] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Real data from backend
+  const { matches, isLoading: loading, error, fetchMatches } = useMatchesStore();
+  const { user } = useAuthStore();
 
   // Animation and real-time updates
   useEffect(() => {
@@ -77,22 +57,32 @@ export default function Home() {
     return () => clearInterval(timer);
   }, []);
 
-  // Function to filter matches
-  const getFilteredMatches = (filter: FilterType) => {
-    if (filter === 'all') return mockMatches;
+  // Fetch matches on component mount
+  useEffect(() => {
+    fetchMatches();
+  }, [fetchMatches]);
+
+  // Function to filter matches with real data
+  const getFilteredMatches = (filterType: FilterType): MatchData[] => {
+    if (!matches || matches.length === 0) return [];
     
-    return mockMatches.filter(match => {
-      if (filter === 'live') return match.status === 'live';
-      if (filter === 'upcoming') return match.status === 'upcoming';
-      if (filter === 'finished') return match.status === 'finished';
-      if (filter === 'followed') return match.isFollowed;
-      return false;
-    });
+    let filteredMatches = matches;
+    if (filterType === 'followed') {
+      // TODO: Implement follows integration with backend
+      // For now, return empty array until follows are implemented
+      return [];
+    }
+    else if (filterType === 'upcoming') filteredMatches = matches.filter(match => match.status === 'upcoming');
+    else if (filterType === 'finished') filteredMatches = matches.filter(match => match.status === 'finished');
+    else if (filterType === 'live') filteredMatches = matches.filter(match => match.status === 'live');
+    
+    // Convert Match[] to MatchData[] for UI components
+    return filteredMatches.map(convertMatchToMatchData);
   };
 
-  const liveMatches = mockMatches.filter(match => match.status === 'live');
-  const upcomingMatches = mockMatches.filter(match => match.status === 'upcoming');
-  const featuredMatch = liveMatches[0] || upcomingMatches[0] || mockMatches[0];
+  const upcomingMatches = matches?.filter(match => match.status === 'upcoming').map(convertMatchToMatchData) || [];
+  const liveMatches = matches?.filter(match => match.status === 'live').map(convertMatchToMatchData) || [];
+  const featuredMatch = liveMatches[0] || upcomingMatches[0] || (matches?.[0] ? convertMatchToMatchData(matches[0]) : null);
 
   return (
     <MainLayout noNavigation={true}>
@@ -159,7 +149,31 @@ export default function Home() {
             </div>
             
             {/* Enhanced Live Match Display */}
-            {liveMatches.length > 0 && (
+            {loading ? (
+              <div className="mb-16">
+                <div className="relative group max-w-2xl mx-auto">
+                  <div className="absolute -inset-1 bg-gradient-to-r from-slate-500/20 via-slate-400/20 to-slate-500/20 rounded-2xl blur-xl opacity-60"></div>
+                  <div className="relative bg-black/40 backdrop-blur-xl rounded-2xl p-8 border border-white/10 animate-pulse">
+                    <div className="flex items-center justify-center space-x-3 mb-6">
+                      <div className="w-3 h-3 bg-slate-500 rounded-full"></div>
+                      <div className="h-4 bg-slate-500 rounded w-20"></div>
+                      <div className="h-6 bg-slate-500 rounded w-12"></div>
+                    </div>
+                    <div className="text-center mb-4">
+                      <div className="flex items-center justify-center space-x-4 mb-2">
+                        <div className="h-8 bg-slate-500 rounded w-24"></div>
+                        <div className="h-8 bg-slate-500 rounded w-16"></div>
+                        <div className="h-8 bg-slate-500 rounded w-24"></div>
+                      </div>
+                      <div className="flex items-center justify-center space-x-2">
+                        <div className="w-4 h-4 bg-slate-500 rounded-sm"></div>
+                        <div className="h-4 bg-slate-500 rounded w-32"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : featuredMatch && liveMatches.length > 0 ? (
               <div className="mb-16">
                 <div className="relative group max-w-2xl mx-auto">
                   {/* Glowing background */}
@@ -174,7 +188,7 @@ export default function Home() {
                       </div>
                       <span className="text-sm font-bold text-red-400 uppercase tracking-wider">LIVE NOW</span>
                       <div className="px-3 py-1 bg-white/10 rounded-full">
-                        <span className="text-sm font-medium text-white">{featuredMatch.minute}'</span>
+                        <span className="text-sm font-medium text-white">{featuredMatch.minute || 0}'</span>
                       </div>
                     </div>
                     
@@ -182,18 +196,20 @@ export default function Home() {
                     <div className="text-center mb-4">
                       <div className="text-2xl md:text-3xl font-bold text-white mb-2">
                         <span className="text-blue-400">{featuredMatch.homeTeam.name}</span>
-                        <span className="mx-4 text-green-400">{featuredMatch.homeTeam.score} - {featuredMatch.awayTeam.score}</span>
+                        <span className="mx-4 text-green-400">{featuredMatch.homeTeam.score || 0} - {featuredMatch.awayTeam.score || 0}</span>
                         <span className="text-purple-400">{featuredMatch.awayTeam.name}</span>
                       </div>
                       <div className="flex items-center justify-center space-x-2 text-white/60">
-                        <div className="w-4 h-4 bg-gradient-to-r from-blue-400 to-purple-400 rounded-sm" />
-                        <span className="text-sm font-medium">{featuredMatch.venue}</span>
+                        <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                        </svg>
+                        <span className="text-sm font-medium">{featuredMatch.venue || 'Stadium'}</span>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
             
             {/* Ultra-Modern CTA Buttons */}
             <div className="mb-20">
@@ -345,112 +361,6 @@ export default function Home() {
           </div>
         </div>
       </section>
-      
-      {/* Enhanced Live Matches Section */}
-      <section className="relative py-24">
-        {/* Section separator */}
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-slate-700/50 to-transparent"></div>
-        
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-16">
-            <div className="text-center lg:text-left">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">Live Matches</h2>
-              <p className="text-slate-300 text-xl font-light">Follow the action in real-time</p>
-            </div>
-            <div className="live-indicator-large flex items-center justify-center lg:justify-start mt-6 lg:mt-0">
-              <div className="relative">
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                </span>
-              </div>
-              <span className="ml-3 text-red-400 font-semibold text-lg tracking-wide">LIVE UPDATES</span>
-            </div>
-          </div>
-          
-          <div className="bg-slate-800/60 rounded-2xl border border-slate-700/50 p-1 mb-12">
-            <Tabs defaultValue="all" className="mb-6" onValueChange={(value) => setActiveFilter(value as FilterType)}>
-              <TabsList className="p-1 bg-slate-700/50 rounded-xl mb-6">
-                <TabsTrigger value="all" className="text-sm font-medium px-5 py-2.5 rounded-lg data-[state=active]:bg-slate-600 data-[state=active]:text-white text-slate-300">All Matches</TabsTrigger>
-                <TabsTrigger value="live" className="text-sm font-medium px-5 py-2.5 rounded-lg data-[state=active]:bg-slate-600 data-[state=active]:text-white text-slate-300">Live</TabsTrigger>
-                <TabsTrigger value="upcoming" className="text-sm font-medium px-5 py-2.5 rounded-lg data-[state=active]:bg-slate-600 data-[state=active]:text-white text-slate-300">Upcoming</TabsTrigger>
-                <TabsTrigger value="finished" className="text-sm font-medium px-5 py-2.5 rounded-lg data-[state=active]:bg-slate-600 data-[state=active]:text-white text-slate-300">Finished</TabsTrigger>
-              </TabsList>
-              
-              <div className="px-4 py-2">
-                <TabsContent value="all" className="space-y-5 animate-fade-in">
-                  {getFilteredMatches('all').map((match) => (
-                    <div key={match.id} className="transform transition-all duration-300 hover:translate-y-[-2px] hover:shadow-floating">
-                      <MatchCard match={match} />
-                    </div>
-                  ))}
-                </TabsContent>
-                
-                <TabsContent value="live" className="space-y-5 animate-fade-in">
-                  {getFilteredMatches('live').map((match) => (
-                    <div key={match.id} className="transform transition-all duration-300 hover:translate-y-[-2px] hover:shadow-floating">
-                      <MatchCard match={match} />
-                    </div>
-                  ))}
-                  {getFilteredMatches('live').length === 0 && (
-                    <div className="text-center py-12 px-6 bg-slate-800/40 rounded-xl border border-slate-700/30">
-                      <div className="w-12 h-12 bg-slate-500 rounded-full mx-auto mb-3" />
-                      <p className="text-slate-300 font-medium">No live matches at the moment</p>
-                      <p className="text-slate-500 text-sm mt-1">Check back soon for upcoming matches</p>
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="upcoming" className="space-y-5 animate-fade-in">
-                  {getFilteredMatches('upcoming').map((match) => (
-                    <div key={match.id} className="transform transition-all duration-300 hover:translate-y-[-2px] hover:shadow-floating">
-                      <MatchCard match={match} />
-                    </div>
-                  ))}
-                  {getFilteredMatches('upcoming').length === 0 && (
-                    <div className="text-center py-12 px-6 bg-slate-800/40 rounded-xl border border-slate-700/30">
-                      <div className="w-12 h-12 bg-slate-500 rounded-full mx-auto mb-3" />
-                      <p className="text-slate-300 font-medium">No upcoming matches scheduled</p>
-                      <p className="text-slate-500 text-sm mt-1">Check back later for the latest schedule</p>
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="finished" className="space-y-5 animate-fade-in">
-                  {getFilteredMatches('finished').map((match) => (
-                    <div key={match.id} className="transform transition-all duration-300 hover:translate-y-[-2px] hover:shadow-floating">
-                      <MatchCard match={match} />
-                    </div>
-                  ))}
-                  {getFilteredMatches('finished').length === 0 && (
-                    <div className="text-center py-12 px-6 bg-slate-800/40 rounded-xl border border-slate-700/30">
-                      <div className="w-12 h-12 bg-slate-500 rounded-full mx-auto mb-3" />
-                      <p className="text-slate-300 font-medium">No finished matches to display</p>
-                      <p className="text-slate-500 text-sm mt-1">Recent match results will appear here</p>
-                    </div>
-                  )}
-                </TabsContent>
-              </div>
-            </Tabs>
-          </div>
-          
-          <div className="text-center mt-12">
-            <div className="inline-flex flex-col items-center">
-              <p className="text-gray-500 mb-4 max-w-md mx-auto">Get personalized match alerts, follow your favorite teams, and access premium features</p>
-              <div className="relative group inline-block">
-                <div className="absolute -inset-1 bg-gradient-to-r from-primary-600 to-primary-400 rounded-lg blur opacity-30 group-hover:opacity-100 transition duration-500"></div>
-                <Button 
-                  onClick={() => router.push('/auth/register')} 
-                  size="lg"
-                  className="relative bg-primary-600 hover:bg-primary-700 text-white px-8 py-3 text-base font-semibold shadow-lg"
-                >
-                  Sign Up for Full Access
-                </Button>
-              </div>
-              <p className="mt-3 text-xs text-gray-400">No credit card required • Free forever</p>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* Ultra-Modern Download Section */}
       <section className="relative py-32 overflow-hidden">
@@ -566,11 +476,13 @@ export default function Home() {
                   <div className="relative bg-black/20 backdrop-blur-sm rounded-2xl p-6 border border-white/10 hover:border-white/20 transition-all duration-300">
                     <div className="flex items-start">
                       <div className="bg-gradient-to-r from-purple-500 to-pink-500 p-3 rounded-xl mr-4 group-hover:scale-110 transition-transform duration-300">
-                        <div className="w-6 h-6 bg-white rounded-full"></div>
+                        <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                        </svg>
                       </div>
                       <div>
-                        <h3 className="font-bold text-white text-lg mb-2 group-hover:text-purple-200 transition-colors duration-300">Live Statistics</h3>
-                        <p className="text-white/70 leading-relaxed group-hover:text-white/90 transition-colors duration-300">Detailed stats and real-time analysis</p>
+                        <h3 className="font-bold text-white text-lg mb-2 group-hover:text-purple-200 transition-colors duration-300">Stadium Guides</h3>
+                        <p className="text-white/70 leading-relaxed group-hover:text-white/90 transition-colors duration-300">Complete stadium information and match day tips</p>
                       </div>
                     </div>
                   </div>

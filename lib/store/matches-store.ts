@@ -12,6 +12,7 @@ export interface Match {
   time: string;
   league: string;
   date: string;
+  minute?: number | null; // Current match minute for live matches
   // Additional fields from API
   homeTeamId?: string;
   awayTeamId?: string;
@@ -76,6 +77,7 @@ const convertFixtureToMatch = (fixture: any): Match => {
     time,
     league: fixture.league?.name || 'Unknown League',
     date: fixture.startTime ? fixture.startTime.split('T')[0] : new Date().toISOString().split('T')[0],
+    minute: fixture.currentMinute || fixture.minute || null, // Map current minute from API
     homeTeamId: fixture.homeTeam?.id,
     awayTeamId: fixture.awayTeam?.id,
     venue: fixture.venue?.name || 'Unknown Venue',
