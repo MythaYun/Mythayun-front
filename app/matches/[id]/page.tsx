@@ -1,974 +1,590 @@
 'use client';
 
-import * as React from 'react';
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { useUserPreferences } from '@/hooks/use-user-preferences';
-import { useMatchDetailsStore, MatchDetails } from '@/lib/store/match-details-store';
-import { useMatchesStore } from '@/lib/store/matches-store';
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { useMatchDetailsStore } from '@/lib/store/match-details-store';
 import MainNavbar from '@/components/navigation/main-navbar';
 
-// Default fallback values for data not available in Football API
-const defaultValues = {
-  stadium: {
-    image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&h=400&fit=crop',
-    architect: 'Information not available',
-    cost: 'Information not available',
-    nickname: 'Stadium',
-    capacity: null,
-    opened: null
-  },
-  weather: {
-    temperature: null,
-    condition: 'Information not available',
-    humidity: null,
-    windSpeed: null
-  },
-  stats: {
-    possession: { home: null, away: null },
-    shots: {
-      home: { total: null, onTarget: null, offTarget: null, blocked: null },
-      away: { total: null, onTarget: null, offTarget: null, blocked: null }
-    },
-    corners: { home: null, away: null },
-    fouls: { home: null, away: null },
-    yellowCards: { home: null, away: null },
-    redCards: { home: null, away: null },
-    offsides: { home: null, away: null },
-    passes: {
-      home: { total: null, accurate: null, percentage: null },
-      away: { total: null, accurate: null, percentage: null }
-    },
-    saves: { home: null, away: null }
-  }
-};
+export default function MatchDetailsPage() {
+  const params = useParams();
+  const matchId = params.id as string;
+  
+  const { 
+    matchDetails, 
+    isLoading, 
+    error, 
+    fetchMatchDetails, 
+    clearMatchDetails 
+  } = useMatchDetailsStore();
 
-type TabType = 'overview' | 'stats' | 'lineups' | 'stadium';
+  const [activeTab, setActiveTab] = useState('overview');
 
-export default function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const router = useRouter();
-  const resolvedParams = React.use(params);
-  const matchId = resolvedParams.id;
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
-  
-  // User preferences for personalization
-  const { isTeamFollowed } = useUserPreferences();
-  
-  // Match details store
-  const { matchDetails, isLoading, error, fetchMatchDetails, clearMatchDetails } = useMatchDetailsStore();
-  
-  // Optimistic UI: Get cached match data for instant display
-  const { getMatchFromCache } = useMatchesStore();
-  const cachedMatch = getMatchFromCache(matchId);
-  
-  // Optimistic UI state: show cached data immediately, then update with full details
-  const [showOptimisticData, setShowOptimisticData] = useState(!!cachedMatch);
-  
-  // Convert cached match data to match details format for optimistic display
-  const createOptimisticMatchDetails = (cachedMatch: any): MatchDetails => {
-    if (!cachedMatch) return null as any;
-    
-    return {
-      // Required MatchDetails properties
-      id: cachedMatch.id,
-      leagueId: 'cached-league',
-      homeTeamId: cachedMatch.homeTeamId || cachedMatch.id + '_home',
-      awayTeamId: cachedMatch.awayTeamId || cachedMatch.id + '_away',
-      venueId: 'cached-venue',
-      kickoffTime: cachedMatch.time || cachedMatch.startTime || new Date().toISOString(),
-      homeTeam: {
-        id: cachedMatch.homeTeamId || cachedMatch.id + '_home',
-        name: cachedMatch.homeTeam,
-        logo: null // Will be filled when full data loads
-      },
-      awayTeam: {
-        id: cachedMatch.awayTeamId || cachedMatch.id + '_away',
-        name: cachedMatch.awayTeam,
-        logo: null // Will be filled when full data loads
-      },
-      league: {
-        id: 'cached',
-        name: cachedMatch.league,
-        logo: null
-      },
-      // Store scores at the match level, not team level (matching API structure)
-      score: {
-        home: cachedMatch.homeScore,
-        away: cachedMatch.awayScore
-      },
-      status: cachedMatch.status,
-      startTime: cachedMatch.time,
-      minute: cachedMatch.status === 'live' ? cachedMatch.time : null,
-      venue: cachedMatch.venue || 'Stadium TBD',
-      // Required arrays/objects with defaults
-      events: [], // Empty events for optimistic display
-      statistics: defaultValues.stats, // Use default stats
-
-      // Optional properties with defaults
-      attendance: null,
-      referee: null,
-      lineups: null,
-      stadium: defaultValues.stadium,
-      weather: defaultValues.weather,
-      // Override with any additional cached data
-      round: cachedMatch.round,
-      season: cachedMatch.season
-    } as unknown as MatchDetails;
-  };
-  
-  // Fetch match details on component mount
   useEffect(() => {
     if (matchId) {
-      // If we have cached data, show it immediately while fetching full details
-      if (cachedMatch) {
-        console.log('🚀 Optimistic UI: Using cached match data for instant display');
-        setShowOptimisticData(true);
-      }
-      
-      // Always fetch full details in background
-      fetchMatchDetails(matchId).then(() => {
-        // Once full details are loaded, hide optimistic data
-        setShowOptimisticData(false);
-      });
+      fetchMatchDetails(matchId);
     }
     
-    // Cleanup on unmount
     return () => {
       clearMatchDetails();
-      setShowOptimisticData(false);
     };
-  }, [matchId, fetchMatchDetails, clearMatchDetails, cachedMatch]);
-  
-  // Use match details from API with comprehensive fallback data
-  // Optimistic UI: Use cached data for instant display, then real API data
-  // Note: This creates a display object that may not be a complete MatchDetails
-  const match = useMemo((): any => {
-    // Priority: 1. Real API data, 2. Optimistic cached data, 3. null
-    let sourceData = matchDetails;
-    let isOptimistic = false;
-    
-    if (!matchDetails && showOptimisticData && cachedMatch) {
-      sourceData = createOptimisticMatchDetails(cachedMatch);
-      isOptimistic = true;
-      console.log('🚀 Optimistic UI: Displaying cached match data');
-    }
-    
-    if (!sourceData) return null;
+  }, [matchId, fetchMatchDetails, clearMatchDetails]);
 
-    // Cast to any for legacy compatibility during refactor
-    const legacyMatch = sourceData as any;
-
-    return {
-      ...sourceData,
-      // Use EXACT same data structure as matches page for consistency
-      homeScore: sourceData.score?.home ?? null,
-      awayScore: sourceData.score?.away ?? null,
-      // Use same time logic as matches page: if minute exists, show it with apostrophe
-      time: sourceData.minute ? `${sourceData.minute}'` : 
-            sourceData.startTime ? new Date(sourceData.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) :
-            'To Be Determined',
-      // Map backend status to frontend status (backend uses 1H, 2H, LIVE, etc.)
-      status: ['1H', '2H', 'LIVE', 'HT'].includes(sourceData.status) ? 'live' : 
-              ['FT', 'AET', 'PEN'].includes(sourceData.status) ? 'finished' : 'not_started',
-      // Stadium data: Use real venue data from Football API when available
-      stadium: {
-        name: legacyMatch.venue?.name || sourceData.stadium?.name || sourceData.venue || 'Stadium',
-        location: legacyMatch.venue?.city || sourceData.stadium?.location || 'Location not available',
-        capacity: sourceData.stadium?.capacity || defaultValues.stadium.capacity,
-        image: sourceData.stadium?.image || defaultValues.stadium.image,
-        architect: sourceData.stadium?.architect || defaultValues.stadium.architect,
-        cost: sourceData.stadium?.cost || defaultValues.stadium.cost,
-        nickname: sourceData.stadium?.nickname || defaultValues.stadium.nickname,
-        opened: sourceData.stadium?.opened || defaultValues.stadium.opened
-      },
-      // Weather data: Not available in Football API, show as unavailable
-      weather: sourceData.weather || defaultValues.weather,
-      // Statistics data: Use real statistics from Football API when available
-      statistics: sourceData.statistics || defaultValues.stats,
-      // Events data: Use real events from Football API when available
-      events: sourceData.events || [],
-      // Lineups data: Use real lineups from Football API when available
-      lineups: sourceData.lineups || null,
-      // Additional data: Use real data from Football API when available
-      attendance: sourceData.attendance || null,
-      referee: sourceData.referee || 'Unknown'
-    };
-  }, [matchDetails, showOptimisticData, cachedMatch]);
-  
-  // Loading state
   if (isLoading) {
     return (
-      <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
-        <MainNavbar />
-        <div className="relative z-10 container mx-auto px-4 py-8 md:pt-8 pt-4 pb-24 md:pb-8">
-          <div className="text-center py-20">
-            <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4 animate-spin">
-              <svg className="w-8 h-8 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-            </div>
-            <h2 className="text-white text-2xl font-bold mb-2">Loading Match Details...</h2>
-            <p className="text-white/70">Please wait while we fetch the latest match information.</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+            <p className="text-white/60">Loading match details...</p>
           </div>
         </div>
+        <MainNavbar />
       </div>
     );
   }
-  
-  // Error state
+
   if (error) {
     return (
-      <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
-        <MainNavbar />
-        <div className="relative z-10 container mx-auto px-4 py-8 md:pt-8 pt-4 pb-24 md:pb-8">
-          <div className="text-center py-20">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-red-400" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-              </svg>
-            </div>
-            <h2 className="text-white text-2xl font-bold mb-2">Error Loading Match</h2>
-            <p className="text-white/70 mb-6">{error}</p>
-            <button
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <p className="text-red-400 mb-4">Error: {error}</p>
+            <button 
               onClick={() => fetchMatchDetails(matchId)}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
-              Try Again
+              Retry
             </button>
           </div>
         </div>
+        <MainNavbar />
       </div>
     );
   }
-  
-  // No match data
+
   if (!matchDetails) {
     return (
-      <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
-        <MainNavbar />
-        <div className="relative z-10 container mx-auto px-4 py-8 md:pt-8 pt-4 pb-24 md:pb-8">
-          <div className="text-center py-20">
-            <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-white/60" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
-              </svg>
-            </div>
-            <h2 className="text-white text-2xl font-bold mb-2">Match Not Found</h2>
-            <p className="text-white/70 mb-6">The requested match could not be found.</p>
-            <button
-              onClick={() => router.push('/matches')}
-              className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-300"
-            >
-              Back to Matches
-            </button>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <p className="text-white/60">Match not found</p>
           </div>
         </div>
+        <MainNavbar />
       </div>
     );
   }
-  
 
-  if (!match) {
-    return <div>Loading...</div>;
-  }
-  
-  // Cast to any for quick build fix
-  const anyMatch = match as any;
-  
-  // Check if teams are followed
-  const isHomeTeamFollowed = isTeamFollowed(anyMatch.homeTeam?.name || '');
-  const isAwayTeamFollowed = isTeamFollowed(anyMatch.awayTeam?.name || '');
+  const tabs = [
+    { 
+      id: 'overview', 
+      label: 'Overview', 
+      icon: <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+    },
+    { 
+      id: 'stats', 
+      label: 'Statistics', 
+      icon: <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M5,9V21H1V9H5M10,3V21H6V3H10M15,6V21H11V6H15M20,8V21H16V8H20Z"/></svg>
+    },
+    { 
+      id: 'lineups', 
+      label: 'Lineups', 
+      icon: <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M16,4C16.88,4 17.67,4.38 18.18,5H20C21.11,5 22,5.89 22,7V9C22,10.11 21.11,11 20,11H4C2.89,11 2,10.11 2,9V7C2,5.89 2.89,5 4,5H5.82C6.33,4.38 7.12,4 8,4C8.88,4 9.67,4.38 10.18,5H13.82C14.33,4.38 15.12,4 16,4M8,6A1,1 0 0,0 7,7A1,1 0 0,0 8,8A1,1 0 0,0 9,7A1,1 0 0,0 8,6M16,6A1,1 0 0,0 15,7A1,1 0 0,0 16,8A1,1 0 0,0 17,7A1,1 0 0,0 16,6M4,13H20V20C20,21.11 19.11,22 18,22H6C4.89,22 4,21.11 4,20V13Z"/></svg>
+    },
+    { 
+      id: 'stadium', 
+      label: 'Stadium', 
+      icon: <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>
+    }
+  ];
 
   return (
-    <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
-      {/* Background Effects */}
-      <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 via-purple-600/10 to-cyan-600/10"></div>
-      <div className="absolute top-0 left-0 w-full h-full">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-to-r from-blue-600/20 via-purple-600/20 to-cyan-600/20 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gradient-to-l from-purple-600/20 via-pink-600/20 to-blue-600/20 rounded-full blur-3xl animate-pulse" style={{animationDelay: '2s'}}></div>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+      <div className="container mx-auto px-4 py-8 pb-24">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-white mb-2">Match Details</h1>
+          <p className="text-white/60">{matchDetails.league} • {matchDetails.date}</p>
+        </div>
 
-      {/* Main Navbar */}
-      <MainNavbar />
-
-      {/* Main Content */}
-      <div className="relative z-10 container mx-auto px-4 py-4 md:py-8 md:pt-8 pb-24 md:pb-8">
-        
         {/* Match Header */}
-        <div className="relative group mb-8">
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/30 to-purple-600/30 rounded-2xl blur-lg opacity-50 group-hover:opacity-70 transition-opacity duration-300"></div>
-          <div className="relative bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/20">
-            
-            {/* Match Status and Info */}
-            <div className="flex items-center justify-center mb-6">
-              <div className="flex items-center space-x-3">
-                <div className={`w-3 h-3 rounded-full animate-pulse ${
-                  match.status === 'live' ? 'bg-red-500' : 
-                  match.status === 'finished' ? 'bg-gray-400' : 'bg-green-500'
-                }`}></div>
-                <span className="text-white/80 font-medium">
-                  {match.status === 'live' ? `LIVE ${match.time}` :
-                   match.status === 'finished' ? 'FULL TIME' : 
-                   match.time}
+        <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-6 mb-8 border border-white/20">
+          <div className="flex items-center justify-between">
+            {/* Home Team */}
+            <div className="flex flex-col items-center flex-1">
+              <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-3">
+                {matchDetails.homeTeamLogo ? (
+                  <img 
+                    src={matchDetails.homeTeamLogo} 
+                    alt={matchDetails.homeTeam}
+                    className="w-12 h-12 object-contain"
+                  />
+                ) : (
+                  <span className="text-white font-bold text-xl">
+                    {matchDetails.homeTeam.charAt(0)}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-white font-bold text-lg text-center">{matchDetails.homeTeam}</h3>
+            </div>
+
+            {/* Score & Status */}
+            <div className="flex flex-col items-center mx-8">
+              <div className="flex items-center space-x-4 mb-2">
+                <span className="text-4xl font-bold text-white">
+                  {matchDetails.homeScore ?? '-'}
                 </span>
-                <span className="text-white/60">•</span>
-                <span className="text-white/60">{match.league?.name || 'League'}</span>
-                <span className="text-white/60">•</span>
-                <span className="text-white/60">{match.stadium.name}</span>
+                <span className="text-2xl text-white/60">-</span>
+                <span className="text-4xl font-bold text-white">
+                  {matchDetails.awayScore ?? '-'}
+                </span>
+              </div>
+              <div className="text-center">
+                <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                  matchDetails.status === 'live' ? 'bg-red-500/20 text-red-400' :
+                  matchDetails.status === 'finished' ? 'bg-green-500/20 text-green-400' :
+                  'bg-blue-500/20 text-blue-400'
+                }`}>
+                  {matchDetails.status === 'live' ? `LIVE ${matchDetails.time}` :
+                   matchDetails.status === 'finished' ? 'FT' :
+                   matchDetails.time}
+                </div>
               </div>
             </div>
-            
-            {/* Teams and Score */}
-            <div className="flex items-center justify-between">
-              {/* Home Team */}
-              <div className="flex flex-col items-center flex-1">
-                <div className={`relative w-20 h-20 mb-4 rounded-full overflow-hidden transition-transform duration-300 hover:scale-110 ${
-                  isHomeTeamFollowed ? 'ring-4 ring-green-400/50' : ''
-                }`}>
-                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-purple-500/20"></div>
+
+            {/* Away Team */}
+            <div className="flex flex-col items-center flex-1">
+              <div className="w-16 h-16 bg-purple-600 rounded-full flex items-center justify-center mb-3">
+                {matchDetails.awayTeamLogo ? (
                   <img 
-                    src={match.homeTeam.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(match.homeTeam.name)}&background=3b82f6&color=fff&size=80`} 
-                    alt={match.homeTeam.name}
-                    className="w-full h-full object-contain p-2"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                      e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                    }}
+                    src={matchDetails.awayTeamLogo} 
+                    alt={matchDetails.awayTeam}
+                    className="w-12 h-12 object-contain"
                   />
-                  <div className="hidden w-full h-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold text-2xl">
-                    {match.homeTeam.name.charAt(0)}
-                  </div>
-                </div>
-                <h3 className="text-white font-bold text-lg text-center mb-1">{match.homeTeam.name}</h3>
-                {isHomeTeamFollowed && (
-                  <div className="flex items-center space-x-1 text-green-400 text-xs">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                    </svg>
-                    <span>Following</span>
-                  </div>
+                ) : (
+                  <span className="text-white font-bold text-xl">
+                    {matchDetails.awayTeam.charAt(0)}
+                  </span>
                 )}
               </div>
-              
-              {/* Score */}
-              <div className="flex flex-col items-center px-8">
-                <div className="flex items-center space-x-4 mb-2">
-                  <div className={`text-5xl font-black transition-colors duration-300 ${
-                    match.status === 'in_progress' ? 'text-red-400' : 'text-white'
-                  }`}>
-                    {match.homeScore ?? 0}
-                  </div>
-                  <div className="text-3xl font-light text-white/60">-</div>
-                  <div className={`text-5xl font-black transition-colors duration-300 ${
-                    match.status === 'in_progress' ? 'text-red-400' : 'text-white'
-                  }`}>
-                    {match.awayScore ?? 0}
-                  </div>
-                </div>
-                {match.status === 'live' && (
-                  <div className="flex items-center space-x-2 px-3 py-1 bg-red-500/20 rounded-full border border-red-500/30">
-                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                    <span className="text-red-400 text-sm font-medium">LIVE</span>
-                  </div>
-                )}
+              <h3 className="text-white font-bold text-lg text-center">{matchDetails.awayTeam}</h3>
+            </div>
+          </div>
+
+          {/* Match Info */}
+          <div className="mt-6 pt-6 border-t border-white/10">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-white/60 text-sm">Venue</div>
+                <div className="text-white font-medium">{matchDetails.venue}</div>
               </div>
-              
-              {/* Away Team */}
-              <div className="flex flex-col items-center flex-1">
-                <div className={`relative w-20 h-20 mb-4 rounded-full overflow-hidden transition-transform duration-300 hover:scale-110 ${
-                  isAwayTeamFollowed ? 'ring-4 ring-green-400/50' : ''
-                }`}>
-                  <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-pink-500/20"></div>
-                  <img 
-                    src={match.awayTeam.logo || `https://ui-avatars.com/api/?name=${encodeURIComponent(match.awayTeam.name)}&background=8b5cf6&color=fff&size=80`} 
-                    alt={match.awayTeam.name}
-                    className="w-full h-full object-contain p-2"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                      e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                    }}
-                  />
-                  <div className="hidden w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-2xl">
-                    {match.awayTeam.name.charAt(0)}
-                  </div>
+              {matchDetails.referee && (
+                <div>
+                  <div className="text-white/60 text-sm">Referee</div>
+                  <div className="text-white font-medium">{matchDetails.referee}</div>
                 </div>
-                <h3 className="text-white font-bold text-lg text-center mb-1">{match.awayTeam.name}</h3>
-                {isAwayTeamFollowed && (
-                  <div className="flex items-center space-x-1 text-green-400 text-xs">
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                    </svg>
-                    <span>Following</span>
-                  </div>
-                )}
-              </div>
+              )}
+              {matchDetails.attendance && (
+                <div>
+                  <div className="text-white/60 text-sm">Attendance</div>
+                  <div className="text-white font-medium">{matchDetails.attendance.toLocaleString()}</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Info Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          {/* Weather Card */}
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-cyan-600/20 to-blue-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-            <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-4 border border-white/20">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-lg flex items-center justify-center">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                  </svg>
-                </div>
-                <div>
-                  {match.weather.temperature !== null ? (
-                    <>
-                      <div className="text-white font-semibold">{match.weather.temperature}°C</div>
-                      <div className="text-white/60 text-sm">{match.weather.condition}</div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="text-white/60 text-sm">Weather data</div>
-                      <div className="text-white/40 text-xs">Not available</div>
-                    </>
+        {/* Tabs Navigation - Mobile Optimized */}
+        <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-2 mb-8 border border-white/20">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-col sm:flex-row items-center justify-center space-y-1 sm:space-y-0 sm:space-x-2 py-3 px-2 sm:px-4 rounded-xl transition-all duration-200 ${
+                  activeTab === tab.id
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center justify-center">
+                  {tab.id === 'overview' && (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                    </svg>
+                  )}
+                  {tab.id === 'stats' && (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M5,9V21H1V9H5M10,3V21H6V3H10M15,6V21H11V6H15M20,8V21H16V8H20Z"/>
+                    </svg>
+                  )}
+                  {tab.id === 'lineups' && (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M16,4C16.88,4 17.67,4.38 18.18,5H20C21.11,5 22,5.89 22,7V9C22,10.11 21.11,11 20,11H4C2.89,11 2,10.11 2,9V7C2,5.89 2.89,5 4,5H5.82C6.33,4.38 7.12,4 8,4C8.88,4 9.67,4.38 10.18,5H13.82C14.33,4.38 15.12,4 16,4M8,6A1,1 0 0,0 7,7A1,1 0 0,0 8,8A1,1 0 0,0 9,7A1,1 0 0,0 8,6M16,6A1,1 0 0,0 15,7A1,1 0 0,0 16,8A1,1 0 0,0 17,7A1,1 0 0,0 16,6M4,13H20V20C20,21.11 19.11,22 18,22H6C4.89,22 4,21.11 4,20V13Z"/>
+                    </svg>
+                  )}
+                  {tab.id === 'stadium' && (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
+                    </svg>
                   )}
                 </div>
-              </div>
-            </div>
+                <span className="font-medium text-xs sm:text-sm">{tab.label}</span>
+              </button>
+            ))}
           </div>
-
-          {/* Referee Card */}
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-yellow-600/20 to-orange-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-            <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-4 border border-white/20">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg flex items-center justify-center">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-white font-semibold">Referee</div>
-                  <div className="text-white/60 text-sm">{match.referee}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Attendance Card */}
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-            <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-4 border border-white/20">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center">
-                  <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-white font-semibold">{match.attendance ? match.attendance.toLocaleString() : 'N/A'}</div>
-                  <div className="text-white/60 text-sm">Attendance</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex space-x-1 mb-8 p-1 bg-white/5 backdrop-blur-xl rounded-xl border border-white/20">
-          {[
-            { 
-              id: 'overview', 
-              label: 'Overview', 
-              icon: (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                </svg>
-              )
-            },
-            { 
-              id: 'stats', 
-              label: 'Statistics', 
-              icon: (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
-                </svg>
-              )
-            },
-            { 
-              id: 'lineups', 
-              label: 'Lineups', 
-              icon: (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.54 8H17c-.8 0-1.54.37-2.01.99L14 10l-1.99-1.01A2.5 2.5 0 0 0 10 8H8.46c-.8 0-1.54.37-2.01.99L3.91 14H6.5v6H9v-7.5h1.5v7.5H13v-6h1.5v6H17zM12.5 11.5c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5S11 9.17 11 10s.67 1.5 1.5 1.5z"/>
-                </svg>
-              )
-            },
-            { 
-              id: 'stadium', 
-              label: 'Stadium Guide', 
-              icon: (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-                </svg>
-              )
-            }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as TabType)}
-              className={`flex-1 flex items-center justify-center space-x-2 py-3 px-4 rounded-lg font-medium transition-all duration-300 ${
-                activeTab === tab.id
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg transform scale-105'
-                  : 'text-white/70 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              {tab.icon}
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
-          ))}
         </div>
 
         {/* Tab Content */}
-        <div className="transition-all duration-300">
-          {activeTab === 'overview' && (
-            <div className="space-y-6">
-              {/* Match Events Timeline */}
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-xl mb-6">Match Events</h3>
-                  <div className="space-y-4">
-                    {match.events.map((event: { id: string; minute: number; type: string; playerName: string; assistPlayerName?: string; teamId: string }, index: number) => (
-                      <div key={`${event.id}-${index}`} className="flex items-center space-x-4 group/event">
-                        <div className="flex flex-col items-center">
-                          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                            {event.minute}'
-                          </div>
-                          {index < match.events.length - 1 && (
-                            <div className="w-0.5 h-8 bg-gradient-to-b from-blue-500 to-purple-500 mt-2"></div>
-                          )}
-                        </div>
-                        <div className="flex-1 bg-white/5 rounded-lg p-4 group-hover/event:bg-white/10 transition-colors duration-300">
-                          <div className="flex items-center space-x-3">
-                            {event.type === 'goal' && (
-                              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-                                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-                                </svg>
-                              </div>
-                            )}
-                            {event.type === 'yellow_card' && (
-                              <div className="w-6 h-8 bg-yellow-400 rounded-sm"></div>
-                            )}
-                            <div>
-                              <div className="text-white font-semibold">{event.playerName || 'Unknown Player'}</div>
-                              {event.assistPlayerName && (
-                                <div className="text-white/60 text-sm">Assist: {event.assistPlayerName}</div>
-                              )}
-                              <div className="text-white/60 text-xs capitalize">
-                                {event.teamId === match.homeTeam.id ? match.homeTeam.name : match.awayTeam.name}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+        {activeTab === 'overview' && (
+          <div className="space-y-8">
+            {/* Match Events */}
+            {matchDetails.events && matchDetails.events.length > 0 && (
+              <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-6 border border-white/20">
+                <h2 className="text-xl font-bold text-white mb-6">Match Events</h2>
+                <div className="space-y-4">
+                  {matchDetails.events.map((event, index) => (
+                    <div key={`${matchDetails.id}-${event.minute}-${event.type}-${index}`} className="flex items-center space-x-4 p-3 bg-white/5 rounded-lg">
+                      <div className="text-white/60 text-sm font-medium w-12">
+                        {event.minute}'
                       </div>
-                    ))}
-                  </div>
+                      <div className={`w-3 h-3 rounded-full ${
+                        event.type === 'GOAL' ? 'bg-green-400' :
+                        event.type === 'YELLOW_CARD' ? 'bg-yellow-400' :
+                        event.type === 'RED_CARD' ? 'bg-red-400' :
+                        'bg-blue-400'
+                      }`}></div>
+                      <div className="flex-1">
+                        <div className="text-white font-medium">
+                          {event.type.replace('_', ' ')}
+                          {event.player && ` - ${event.player}`}
+                        </div>
+                        {event.assist && (
+                          <div className="text-white/60 text-sm">Assist: {event.assist}</div>
+                        )}
+                      </div>
+                      <div className={`text-sm font-medium ${
+                        event.team === 'home' ? 'text-blue-400' : 'text-purple-400'
+                      }`}>
+                        {event.team === 'home' ? matchDetails.homeTeam : matchDetails.awayTeam}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+        )}
 
-          {activeTab === 'stats' && (
+        {activeTab === 'stats' && matchDetails.statistics && (
+          <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-6 mb-8 border border-white/20">
+            <h2 className="text-xl font-bold text-white mb-6">Statistics</h2>
+            
             <div className="space-y-6">
-              {/* Key Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="relative group">
-                  <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                  <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                    <h4 className="text-white font-semibold mb-4">Possession</h4>
-                    {match.stats.possession.home !== null && match.stats.possession.away !== null ? (
-                      <>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-blue-400 font-bold">{match.stats.possession.home}%</span>
-                          <span className="text-purple-400 font-bold">{match.stats.possession.away}%</span>
-                        </div>
-                        <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-1000"
-                            style={{ width: `${match.stats.possession.home}%` }}
-                          ></div>
-                        </div>
-                      </>
+              {/* Possession */}
+              {matchDetails.statistics?.possession?.home !== null && matchDetails.statistics?.possession?.away !== null && (
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-blue-400 font-bold">{matchDetails.statistics?.possession?.home}%</span>
+                    <span className="text-white/60 text-sm">Possession</span>
+                    <span className="text-purple-400 font-bold">{matchDetails.statistics?.possession?.away}%</span>
+                  </div>
+                  <div className="w-full bg-white/10 rounded-full h-3">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all duration-1000"
+                      style={{ width: `${matchDetails.statistics?.possession?.home}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Other Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {matchDetails.statistics?.shots?.total?.home !== null && (
+                  <div className="text-center">
+                    <div className="text-white/60 text-sm mb-1">Shots</div>
+                    <div className="flex justify-between">
+                      <span className="text-blue-400 font-bold">{matchDetails.statistics?.shots?.total?.home}</span>
+                      <span className="text-purple-400 font-bold">{matchDetails.statistics?.shots?.total?.away}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {matchDetails.statistics?.corners?.home !== null && (
+                  <div className="text-center">
+                    <div className="text-white/60 text-sm mb-1">Corners</div>
+                    <div className="flex justify-between">
+                      <span className="text-blue-400 font-bold">{matchDetails.statistics?.corners?.home}</span>
+                      <span className="text-purple-400 font-bold">{matchDetails.statistics?.corners?.away}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {matchDetails.statistics?.fouls?.home !== null && (
+                  <div className="text-center">
+                    <div className="text-white/60 text-sm mb-1">Fouls</div>
+                    <div className="flex justify-between">
+                      <span className="text-blue-400 font-bold">{matchDetails.statistics?.fouls?.home}</span>
+                      <span className="text-purple-400 font-bold">{matchDetails.statistics?.fouls?.away}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {matchDetails.statistics?.yellowCards?.home !== null && (
+                  <div className="text-center">
+                    <div className="text-white/60 text-sm mb-1">Yellow Cards</div>
+                    <div className="flex justify-between">
+                      <span className="text-blue-400 font-bold">{matchDetails.statistics?.yellowCards?.home}</span>
+                      <span className="text-purple-400 font-bold">{matchDetails.statistics?.yellowCards?.away}</span>
+                    </div>
+                  </div>
+                )}
+                
+                {matchDetails.statistics?.redCards?.home !== null && (
+                  <div className="text-center">
+                    <div className="text-white/60 text-sm mb-1">Red Cards</div>
+                    <div className="flex justify-between">
+                      <span className="text-blue-400 font-bold">{matchDetails.statistics?.redCards?.home}</span>
+                      <span className="text-purple-400 font-bold">{matchDetails.statistics?.redCards?.away}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Lineups Tab */}
+        {activeTab === 'lineups' && (
+          <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-4 sm:p-6 border border-white/20">
+            <h2 className="text-xl font-bold text-white mb-6">Team Lineups</h2>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+              {/* Home Team Lineup */}
+              <div>
+                <h3 className="text-lg font-semibold text-blue-400 mb-4 flex items-center">
+                  <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center mr-3">
+                    {matchDetails.homeTeamLogo ? (
+                      <img src={matchDetails.homeTeamLogo} alt={matchDetails.homeTeam} className="w-6 h-6 object-contain" />
                     ) : (
-                      <div className="text-center py-4">
-                        <div className="text-white/60 text-sm">Data not available</div>
-                        <div className="text-white/40 text-xs mt-1">Not provided by Football API</div>
-                      </div>
+                      <span className="text-white text-sm font-bold">{matchDetails.homeTeam.charAt(0)}</span>
                     )}
                   </div>
+                  {matchDetails.homeTeam}
+                </h3>
+                
+                {/* Formation */}
+                <div className="mb-4">
+                  <span className="text-white/60 text-sm">Formation: </span>
+                  <span className="text-white font-medium">4-3-3</span>
                 </div>
-
-                <div className="relative group">
-                  <div className="absolute -inset-1 bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                  <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                    <h4 className="text-white font-semibold mb-4">Shots</h4>
-                    {match.stats.shots.home.total !== null && match.stats.shots.away.total !== null ? (
-                      <>
-                        <div className="space-y-3">
-                          {/* Total Shots */}
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-blue-400 font-bold">{match.stats.shots.home.total}</span>
-                              <span className="text-white/60 text-sm">Total Shots</span>
-                              <span className="text-purple-400 font-bold">{match.stats.shots.away.total}</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <div className="flex-1 bg-white/10 rounded-full h-3 overflow-hidden">
-                                <div 
-                                  className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-1000"
-                                  style={{ width: `${(match.stats.shots.home.total + match.stats.shots.away.total) > 0 ? (match.stats.shots.home.total / (match.stats.shots.home.total + match.stats.shots.away.total)) * 100 : 50}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* On Target */}
-                          {match.stats.shots.home.onTarget !== null && match.stats.shots.away.onTarget !== null && (
-                            <div>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-blue-300 text-sm">{match.stats.shots.home.onTarget}</span>
-                                <span className="text-white/50 text-xs">On Target</span>
-                                <span className="text-purple-300 text-sm">{match.stats.shots.away.onTarget}</span>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
-                                  <div 
-                                    className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-1000"
-                                    style={{ width: `${(match.stats.shots.home.onTarget + match.stats.shots.away.onTarget) > 0 ? (match.stats.shots.home.onTarget / (match.stats.shots.home.onTarget + match.stats.shots.away.onTarget)) * 100 : 50}%` }}
-                                  ></div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-center py-4">
-                        <div className="text-white/60 text-sm">Shot statistics available</div>
-                        <div className="text-white/40 text-xs mt-1">Provided by advanced Football API</div>
+                
+                {/* Starting XI */}
+                <div className="space-y-2">
+                  <h4 className="text-white font-medium text-sm uppercase tracking-wide">Starting XI</h4>
+                  {Array.from({ length: 11 }, (_, i) => (
+                    <div key={i} className="flex items-center space-x-3 p-2 bg-white/5 rounded-lg">
+                      <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                        {i + 1}
                       </div>
+                      <div className="flex-1">
+                        <div className="text-white font-medium">Player {i + 1}</div>
+                        <div className="text-white/60 text-sm">Position</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Away Team Lineup */}
+              <div>
+                <h3 className="text-lg font-semibold text-purple-400 mb-4 flex items-center">
+                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center mr-3">
+                    {matchDetails.awayTeamLogo ? (
+                      <img src={matchDetails.awayTeamLogo} alt={matchDetails.awayTeam} className="w-6 h-6 object-contain" />
+                    ) : (
+                      <span className="text-white text-sm font-bold">{matchDetails.awayTeam.charAt(0)}</span>
                     )}
                   </div>
+                  {matchDetails.awayTeam}
+                </h3>
+                
+                {/* Formation */}
+                <div className="mb-4">
+                  <span className="text-white/60 text-sm">Formation: </span>
+                  <span className="text-white font-medium">4-4-2</span>
                 </div>
-              </div>
-
-              {/* Detailed Stats */}
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-xl mb-6">Advanced Statistics</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    
-                    {/* Passes Statistics */}
-                    <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-                      <h4 className="text-white font-semibold mb-3 flex items-center">
-                        <svg className="w-5 h-5 mr-2 text-green-400" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                        </svg>
-                        Passes
-                      </h4>
-                      {match.stats.passes.home.total !== null && match.stats.passes.away.total !== null ? (
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.passes.home.total}</span>
-                            <span className="text-white/60">Total</span>
-                            <span className="text-purple-400">{match.stats.passes.away.total}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-300">{match.stats.passes.home.accurate}</span>
-                            <span className="text-white/60">Accurate</span>
-                            <span className="text-purple-300">{match.stats.passes.away.accurate}</span>
-                          </div>
-                          {match.stats.passes.home.percentage !== null && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-blue-200">{match.stats.passes.home.percentage}%</span>
-                              <span className="text-white/60">Accuracy</span>
-                              <span className="text-purple-200">{match.stats.passes.away.percentage}%</span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-white/60 text-sm">Pass statistics available</div>
-                      )}
-                    </div>
-
-                    {/* Cards Statistics */}
-                    <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-                      <h4 className="text-white font-semibold mb-3 flex items-center">
-                        <svg className="w-5 h-5 mr-2 text-yellow-400" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-                        </svg>
-                        Cards
-                      </h4>
-                      <div className="space-y-2">
-                        {match.stats.yellowCards.home !== null && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.yellowCards.home}</span>
-                            <span className="text-yellow-400">Yellow Cards</span>
-                            <span className="text-purple-400">{match.stats.yellowCards.away}</span>
-                          </div>
-                        )}
-                        {match.stats.redCards.home !== null && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.redCards.home}</span>
-                            <span className="text-red-400">Red Cards</span>
-                            <span className="text-purple-400">{match.stats.redCards.away}</span>
-                          </div>
-                        )}
+                
+                {/* Starting XI */}
+                <div className="space-y-2">
+                  <h4 className="text-white font-medium text-sm uppercase tracking-wide">Starting XI</h4>
+                  {Array.from({ length: 11 }, (_, i) => (
+                    <div key={i} className="flex items-center space-x-3 p-2 bg-white/5 rounded-lg">
+                      <div className="w-6 h-6 bg-purple-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-white font-medium">Player {i + 1}</div>
+                        <div className="text-white/60 text-sm">Position</div>
                       </div>
                     </div>
-
-                    {/* Other Statistics */}
-                    <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-                      <h4 className="text-white font-semibold mb-3">Other Stats</h4>
-                      <div className="space-y-2">
-                        {match.stats.corners.home !== null && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.corners.home}</span>
-                            <span className="text-white/60">Corners</span>
-                            <span className="text-purple-400">{match.stats.corners.away}</span>
-                          </div>
-                        )}
-                        {match.stats.fouls.home !== null && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.fouls.home}</span>
-                            <span className="text-white/60">Fouls</span>
-                            <span className="text-purple-400">{match.stats.fouls.away}</span>
-                          </div>
-                        )}
-                        {match.stats.offsides.home !== null && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.offsides.home}</span>
-                            <span className="text-white/60">Offsides</span>
-                            <span className="text-purple-400">{match.stats.offsides.away}</span>
-                          </div>
-                        )}
-                        {match.stats.saves && match.stats.saves.home !== null && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.saves.home}</span>
-                            <span className="text-white/60">Saves</span>
-                            <span className="text-purple-400">{match.stats.saves.away}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Shot Breakdown */}
-                    <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-                      <h4 className="text-white font-semibold mb-3 flex items-center">
-                        <svg className="w-5 h-5 mr-2 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                        </svg>
-                        Shot Breakdown
-                      </h4>
-                      {match.stats.shots.home.total !== null ? (
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.shots.home.onTarget}</span>
-                            <span className="text-green-400">On Target</span>
-                            <span className="text-purple-400">{match.stats.shots.away.onTarget}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.shots.home.offTarget}</span>
-                            <span className="text-orange-400">Off Target</span>
-                            <span className="text-purple-400">{match.stats.shots.away.offTarget}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-blue-400">{match.stats.shots.home.blocked}</span>
-                            <span className="text-red-400">Blocked</span>
-                            <span className="text-purple-400">{match.stats.shots.away.blocked}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-white/60 text-sm">Shot breakdown available</div>
-                      )}
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
-          )}
-
-          {activeTab === 'lineups' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-lg mb-4">{match.homeTeam.name} ({match.lineups?.home?.formation || '4-4-2'})</h3>
-                  <div className="space-y-3">
-                    {(match.lineups?.home?.players || []).map((player: { number: number; name: string; position: string }) => (
-                      <div key={player.number} className="flex items-center space-x-3 p-2 bg-white/5 rounded-lg hover:bg-white/10 transition-colors duration-300">
-                        <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                          {player.number}
-                        </div>
-                        <div className="flex-1">
-                          <div className="text-white font-medium">{player.name}</div>
-                          <div className="text-white/60 text-sm">{player.position}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-lg mb-4">{match.awayTeam.name} ({match.lineups?.away?.formation || '4-4-2'})</h3>
-                  <div className="space-y-3">
-                    {(match.lineups?.away?.players || []).map((player: { number: number; name: string; position: string }) => (
-                      <div key={player.number} className="flex items-center space-x-3 p-2 bg-white/5 rounded-lg hover:bg-white/10 transition-colors duration-300">
-                        <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                          {player.number}
-                        </div>
-                        <div className="flex-1">
-                          <div className="text-white font-medium">{player.name}</div>
-                          <div className="text-white/60 text-sm">{player.position}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'stadium' && (
-            <div className="space-y-6">
-              {/* Stadium Hero Image */}
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                <div className="relative bg-white/5 backdrop-blur-xl rounded-xl overflow-hidden border border-white/20">
-                  <div className="relative h-64 overflow-hidden">
-                    <img 
-                      src={match.stadium.image} 
-                      alt={match.stadium.name}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                    <div className="absolute bottom-4 left-4">
-                      <h2 className="text-white text-2xl font-bold">{match.stadium.name}</h2>
-                      <p className="text-white/80">{match.stadium.location}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
+          </div>
+        )}
+        
+        {/* Stadium Tab */}
+        {activeTab === 'stadium' && (
+          <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-4 sm:p-6 border border-white/20">
+            <h2 className="text-xl font-bold text-white mb-6">Stadium Guide</h2>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
               {/* Stadium Info */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="relative group">
-                  <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                  <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                    <h3 className="text-white font-bold text-lg mb-4">Stadium Information</h3>
-                    <div className="space-y-3">
-                      {match.stadium?.capacity && (
-                        <div className="flex justify-between">
-                          <span className="text-white/60">Capacity:</span>
-                          <span className="text-white font-semibold">{match.stadium.capacity.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {match.stadium?.opened && (
-                        <div className="flex justify-between">
-                          <span className="text-white/60">Opened:</span>
-                          <span className="text-white font-semibold">{match.stadium.opened}</span>
-                        </div>
-                      )}
-                      {match.stadium?.architect && (
-                        <div className="flex justify-between">
-                          <span className="text-white/60">Architect:</span>
-                          <span className="text-white font-semibold">{match.stadium.architect}</span>
-                        </div>
-                      )}
-                      {match.stadium?.cost && (
-                        <div className="flex justify-between">
-                          <span className="text-white/60">Construction Cost:</span>
-                          <span className="text-white font-semibold">{match.stadium.cost}</span>
-                        </div>
-                      )}
-                      {match.stadium?.nickname && (
-                        <div className="flex justify-between">
-                          <span className="text-white/60">Nickname:</span>
-                          <span className="text-white font-semibold">{match.stadium.nickname}</span>
-                        </div>
-                      )}
-                      {!match.stadium?.capacity && !match.stadium?.opened && !match.stadium?.architect && !match.stadium?.cost && !match.stadium?.nickname && (
-                        <div className="text-white/60 text-center py-4">
-                          Stadium information not available
-                        </div>
-                      )}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-4">Stadium Information</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-start">
+                      <span className="text-white/60 text-sm sm:text-base">Name:</span>
+                      <span className="text-white font-medium text-sm sm:text-base text-right">{matchDetails.venue || 'Stadium Name'}</span>
+                    </div>
+                    <div className="flex justify-between items-start">
+                      <span className="text-white/60 text-sm sm:text-base">Capacity:</span>
+                      <span className="text-white font-medium text-sm sm:text-base">75,000</span>
+                    </div>
+                    <div className="flex justify-between items-start">
+                      <span className="text-white/60 text-sm sm:text-base">Opened:</span>
+                      <span className="text-white font-medium text-sm sm:text-base">2010</span>
+                    </div>
+                    <div className="flex justify-between items-start">
+                      <span className="text-white/60 text-sm sm:text-base">Surface:</span>
+                      <span className="text-white font-medium text-sm sm:text-base">Natural Grass</span>
                     </div>
                   </div>
                 </div>
-
-                <div className="relative group">
-                  <div className="absolute -inset-1 bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                  <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                    <h3 className="text-white font-bold text-lg mb-4">Match Day Details</h3>
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <div className="text-white/80">{/* <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                        </svg> */}</div>
-                        <span className="text-white font-semibold">{new Date(match.date).toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Kick-off:</span>
-                        <span className="text-white font-semibold">{match.time}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Competition:</span>
-                        <span className="text-white font-semibold">{match.league?.name || 'League'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Weather:</span>
-                        <span className="text-white font-semibold">
-                          {match.weather.temperature !== null ? 
-                            `${match.weather.temperature}°C, ${match.weather.condition}` : 
-                            'Not available'
-                          }
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-white/60">Expected Attendance:</span>
-                        <span className="text-white font-semibold">{match.attendance ? match.attendance.toLocaleString() : 'N/A'}</span>
-                      </div>
+                
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-4">Getting There</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <h4 className="text-white font-medium mb-2 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                        </svg>
+                        Public Transport
+                      </h4>
+                      <p className="text-white/60 text-sm">Metro Line 2 - Stadium Station (5 min walk)</p>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-medium mb-2 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.22.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
+                        </svg>
+                        By Car
+                      </h4>
+                      <p className="text-white/60 text-sm">Parking available on-site. €10 per vehicle.</p>
+                    </div>
+                    <div>
+                      <h4 className="text-white font-medium mb-2 flex items-center">
+                        <svg className="w-5 h-5 mr-2 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V6h12v5z"/>
+                        </svg>
+                        Shuttle Bus
+                      </h4>
+                      <p className="text-white/60 text-sm">Free shuttle from city center on match days.</p>
                     </div>
                   </div>
                 </div>
               </div>
-
-              {/* Stadium Description */}
-              <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-green-600/20 to-emerald-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
-                <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-lg mb-4">About {match.stadium?.name || 'Stadium'}</h3>
-                  <p className="text-white/80 leading-relaxed">
-                    {match.stadium?.name || 'This stadium'} is the home stadium of {match.homeTeam.name}
-                    {match.stadium?.location && `, located in ${match.stadium.location}`}. 
-                    {match.stadium?.opened && `Opened in ${match.stadium.opened}, `}
-                    {match.stadium?.architect && `this magnificent stadium was designed by ${match.stadium.architect} `}
-                    {match.stadium?.cost && `at a construction cost of ${match.stadium.cost}. `}
-                    {match.stadium?.capacity && `With a capacity of ${match.stadium.capacity.toLocaleString()} spectators, `}
-                    {match.stadium?.nickname && `it's known affectionately as "${match.stadium.nickname}" by fans and `}
-                    it has become an iconic venue in world football.
-                  </p>
+              
+              {/* Stadium Features */}
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-4">Stadium Features</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      {
+                        name: 'Food Courts',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M8.1 13.34l2.83-2.83L3.91 3.5c-1.56 1.56-1.56 4.09 0 5.66l4.19 4.18zm6.78-1.81c1.53.71 3.68.21 5.27-1.38 1.91-1.91 2.28-4.65.81-6.12-1.46-1.46-4.20-1.10-6.12.81-1.59 1.59-2.09 3.74-1.38 5.27L3.7 19.87l1.41 1.41L12 14.41l6.88 6.88 1.41-1.41L13.41 13l1.47-1.47z"/></svg>
+                      },
+                      {
+                        name: 'Club Store',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L21.7 4H5.21l-.94-2H1zm16 16c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                      },
+                      {
+                        name: 'Family Areas',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M16 4c0-1.11.89-2 2-2s2 .89 2 2-.89 2-2 2-2-.89-2-2zm4 18v-6h2.5l-2.54-7.63A1.5 1.5 0 0 0 18.54 7H16.5c-.8 0-1.54.5-1.85 1.26l-1.92 5.63c-.15.45.15.95.6 1.05.45.1.95-.15 1.05-.6L15.5 11h1.86L19.5 18H22v2h-2zM12.5 11.5c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5S11 9.17 11 10s.67 1.5 1.5 1.5zM5.5 6c1.11 0 2-.89 2-2s-.89-2-2-2-2 .89-2 2 .89 2 2 2zm2 16v-7H9V9.5c0-.8-.67-1.5-1.5-1.5S6 8.7 6 9.5V15H4v7h3.5z"/></svg>
+                      },
+                      {
+                        name: 'Accessibility',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm9 7h-6v13h-2v-6h-2v6H9V9H3V7h18v2z"/></svg>
+                      },
+                      {
+                        name: 'Free WiFi',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.07 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+                      },
+                      {
+                        name: 'Fan Zone',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                      },
+                      {
+                        name: 'Medical Center',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M19 8h-2v3h-3v2h3v3h2v-3h3v-2h-3V8zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+                      },
+                      {
+                        name: 'Security',
+                        icon: <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,7C13.4,7 14.8,8.6 14.8,10V11C15.4,11 16,11.4 16,12V16C16,16.6 15.6,17 15,17H9C8.4,17 8,16.6 8,16V12C8,11.4 8.4,11 9,11V10C9,8.6 10.6,7 12,7M12,8.2C11.2,8.2 10.2,9.2 10.2,10V11H13.8V10C13.8,9.2 12.8,8.2 12,8.2Z"/></svg>
+                      }
+                    ].map((feature, index) => (
+                      <div key={index} className="flex items-center space-x-3 p-3 bg-white/5 rounded-lg">
+                        {feature.icon}
+                        <span className="text-sm text-white font-medium">{feature.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-4">Match Day Tips</h3>
+                  <div className="space-y-3">
+                    <div className="p-3 bg-blue-600/20 rounded-lg border border-blue-500/30">
+                      <h4 className="text-blue-400 font-medium mb-1 flex items-center">
+                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
+                        </svg>
+                        Arrive Early
+                      </h4>
+                      <p className="text-white/60 text-sm">Gates open 2 hours before kickoff. Arrive early to avoid queues.</p>
+                    </div>
+                    <div className="p-3 bg-green-600/20 rounded-lg border border-green-500/30">
+                      <h4 className="text-green-400 font-medium mb-1 flex items-center">
+                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M22,16A2,2 0 0,1 20,18H8C6.89,18 6,17.1 6,16V4C6,2.89 6.89,2 8,2H20A2,2 0 0,1 22,4V16M16,6V8H18V6H16M16,10V12H18V10H16M16,14V16H18V14H16M8,6V8H14V6H8M8,10V12H14V10H8M8,14V16H14V14H8Z"/>
+                        </svg>
+                        Digital Tickets
+                      </h4>
+                      <p className="text-white/60 text-sm">Download the official app for contactless entry.</p>
+                    </div>
+                    <div className="p-3 bg-yellow-600/20 rounded-lg border border-yellow-500/30">
+                      <h4 className="text-yellow-400 font-medium mb-1 flex items-center">
+                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M15,13V11A3,3 0 0,0 12,8A3,3 0 0,0 9,11V13A2,2 0 0,0 7,15V19A2,2 0 0,0 9,21H15A2,2 0 0,0 17,19V15A2,2 0 0,0 15,13M12,17A1,1 0 0,1 11,16A1,1 0 0,1 12,15A1,1 0 0,1 13,16A1,1 0 0,1 12,17M14,13H10V11A2,2 0 0,1 12,9A2,2 0 0,1 14,11M12,3L13.09,8.26L22,9L17,14L18.18,23L12,19.77L5.82,23L7,14L2,9L10.91,8.26L12,3Z"/>
+                        </svg>
+                        Weather
+                      </h4>
+                      <p className="text-white/60 text-sm">Check weather conditions and dress appropriately.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          )}
-        </div>
-
+          </div>
+        )}
       </div>
+
+      <MainNavbar />
     </div>
   );
 }
