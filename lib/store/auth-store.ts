@@ -98,9 +98,13 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           console.warn('Logout API call failed:', error);
         } finally {
-          // Clear everything regardless of API call success
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
+          // Complete localStorage cleanup - remove all stored data
+          localStorage.clear();
+          
+          // Also clear sessionStorage if any data is stored there
+          sessionStorage.clear();
+          
+          // Reset auth store state
           set({
             user: null,
             isAuthenticated: false,

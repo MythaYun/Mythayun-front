@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/store/auth-store';
+import { useUserPreferencesStore } from '@/lib/store/user-preferences-store';
 import { oauthService } from '@/lib/oauth';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { login, isLoading, error } = useAuthStore();
+  const { onboardingCompleted } = useUserPreferencesStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,9 +25,15 @@ export default function LoginPage() {
     try {
       await login({ email, password });
       
-      // Redirect to onboarding after successful login
+      // Conditional redirection based on local onboarding completion
       setTimeout(() => {
-        router.replace('/auth/onboarding');
+        if (onboardingCompleted) {
+          // Existing user - go directly to matches
+          router.replace('/matches');
+        } else {
+          // New user - go to onboarding
+          router.replace('/auth/onboarding');
+        }
       }, 100);
     } catch (err: any) {
       console.error('Login error:', err);

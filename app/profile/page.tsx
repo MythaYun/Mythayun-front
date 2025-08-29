@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/store/auth-store';
 import { useUserPreferencesStore } from '@/lib/store/user-preferences-store';
 import { useUserProfileStore } from '@/lib/store/user-profile-store';
+import { LogoutConfirmationModal } from '@/components/ui/logout-confirmation-modal';
 import MainNavbar from '@/components/navigation/main-navbar';
 
 export default function ProfilePage() {
@@ -21,6 +22,8 @@ export default function ProfilePage() {
   } = useUserProfileStore();
   const [isEditMode, setIsEditMode] = useState(false);
   const [fullName, setFullName] = useState('');
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     // Check authentication - redirect to login if not authenticated
@@ -41,8 +44,24 @@ export default function ProfilePage() {
   }, [profile]);
 
   const handleLogout = () => {
-    logout();
-    router.push('/');
+    setShowLogoutModal(true);
+  };
+
+  const handleLogoutConfirm = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      router.push('/');
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setIsLoggingOut(false);
+      setShowLogoutModal(false);
+    }
+  };
+
+  const handleLogoutCancel = () => {
+    setShowLogoutModal(false);
   };
 
   const handleUpdateProfile = async () => {
@@ -307,6 +326,14 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+      
+      {/* Logout Confirmation Modal */}
+      <LogoutConfirmationModal
+        isOpen={showLogoutModal}
+        onClose={handleLogoutCancel}
+        onConfirm={handleLogoutConfirm}
+        isLoading={isLoggingOut}
+      />
     </div>
   );
 }
