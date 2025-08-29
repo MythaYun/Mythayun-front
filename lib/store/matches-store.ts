@@ -38,6 +38,8 @@ interface MatchesState {
   // Cache utilities
   isCacheValid: () => boolean;
   getCacheAge: () => number | null;
+  // Optimistic UI
+  getMatchFromCache: (matchId: string) => Match | null;
 }
 
 // Helper function to convert real API fixture to our Match interface
@@ -198,9 +200,24 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
   fetchMatchesByDate: async (date: string) => {
     set({ isLoading: true, error: null });
     try {
-      // Use getTodayFixtures or getFixtures with date filter
-      const response = await matchesApi.getTodayFixtures();
-      const matches = response.fixtures.map(convertFixtureToMatch);
+      console.log('Fetching matches for date:', date);
+      // Use getFixtures with the specific date parameter
+      const response = await matchesApi.getFixtures({ date });
+      console.log('API Response for date:', response); // Debug log
+      
+      // Handle both direct array and object with fixtures property (same logic as fetchMatches)
+      let fixturesArray;
+      if (Array.isArray(response)) {
+        // API returns direct array
+        fixturesArray = response;
+      } else if (response && response.fixtures && Array.isArray(response.fixtures)) {
+        // API returns object with fixtures property
+        fixturesArray = response.fixtures;
+      } else {
+        throw new Error('Invalid API response: no fixtures data found');
+      }
+      
+      const matches = fixturesArray.map(convertFixtureToMatch);
       
       set({
         matches,
@@ -270,15 +287,21 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
 
   // Cache utilities
   isCacheValid: () => {
-    const state = get();
+    const { lastUpdated } = get();
     const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    return !!(state.lastUpdated && 
-      (Date.now() - state.lastUpdated.getTime()) < CACHE_TTL);
+    return !!(lastUpdated && (Date.now() - lastUpdated.getTime()) < CACHE_TTL);
   },
 
   getCacheAge: () => {
-    const state = get();
-    if (!state.lastUpdated) return null;
-    return Date.now() - state.lastUpdated.getTime();
+    const { lastUpdated } = get();
+    return lastUpdated ? Date.now() - lastUpdated.getTime() : null;
+  },
+
+  // Optimistic UI: Get match from cache for instant display
+  getMatchFromCache: (matchId: string) => {
+    const { matches, liveMatches } = get();
+    // Search in both regular matches and live matches
+    const allMatches = [...matches, ...liveMatches];
+    return allMatches.find(match => match.id === matchId) || null;
   },
 }));

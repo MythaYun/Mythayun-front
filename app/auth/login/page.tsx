@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/store/auth-store';
+import { oauthService } from '@/lib/oauth';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,12 +35,17 @@ export default function LoginPage() {
   
   // Handler for social authentication
   const handleSocialLogin = async (provider: 'google' | 'facebook') => {
-    // TODO: Implement social authentication with backend API
-    // For now, redirect to OAuth provider URL when backend supports it
-    console.log(`Social login with ${provider} - Not implemented yet`);
-    
-    // In production, this would redirect to:
-    // window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/${provider}`;
+    try {
+      // Initiate OAuth flow using our native OAuth service
+      if (provider === 'google') {
+        await oauthService.initiateGoogleAuth();
+      } else if (provider === 'facebook') {
+        await oauthService.initiateFacebookAuth();
+      }
+    } catch (err) {
+      console.error(`${provider} OAuth initiation failed:`, err);
+      // Could show an error toast here
+    }
   };
 
   return (

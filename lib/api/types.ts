@@ -30,6 +30,14 @@ export interface RefreshTokenRequest {
   refreshToken: string;
 }
 
+export interface SocialAuthRequest {
+  provider: 'google' | 'facebook' | 'apple';
+  providerId: string;
+  email: string;
+  name: string;
+  avatar?: string;
+}
+
 // User Types
 export interface User {
   id: string;
@@ -84,7 +92,7 @@ export interface Fixture {
   homeTeamId: string;
   awayTeamId: string;
   venueId: string;
-  status: 'not_started' | 'in_progress' | 'finished' | 'postponed' | 'cancelled';
+  status: 'not_started' | 'in_progress' | 'finished' | 'postponed' | 'cancelled' | '1H' | '2H' | 'LIVE' | 'HT' | 'FT' | 'NS';
   kickoffTime: string;
   currentMinute?: number;
   homeScore?: number;
@@ -169,6 +177,51 @@ export interface MatchStatistics {
 export interface MatchDetails extends Fixture {
   events: MatchEvent[];
   statistics: MatchStatistics;
+  // Additional match details from Football API
+  score?: {
+    home: number | null;
+    away: number | null;
+  };
+  minute?: number | null;
+  startTime?: string;
+  attendance?: number | null;
+  referee?: string | null;
+  lineups?: {
+    home: {
+      formation: string;
+      players: Array<{
+        number: number;
+        name: string;
+        position: string;
+      }>;
+    };
+    away: {
+      formation: string;
+      players: Array<{
+        number: number;
+        name: string;
+        position: string;
+      }>;
+    };
+  };
+  // Stadium/venue details
+  stadium?: {
+    name: string;
+    location: string;
+    capacity: number | null;
+    image: string;
+    architect: string;
+    cost: string;
+    nickname: string;
+    opened: number | null;
+  };
+  // Weather data (not available from Football API)
+  weather?: {
+    temperature: number | null;
+    condition: string;
+    humidity: number | null;
+    windSpeed: number | null;
+  };
 }
 
 // Fixtures API Response Types

@@ -113,7 +113,12 @@ async function apiClient<T = any>(endpoint: string, options: FetchOptions = {}):
         console.warn('Could not parse error response:', parseError);
       }
       
-      throw new Error(errorMessage);
+      // Ensure errorMessage is always a string
+      const finalErrorMessage = typeof errorMessage === 'string' 
+        ? errorMessage 
+        : JSON.stringify(errorMessage);
+      
+      throw new Error(finalErrorMessage);
     }
     
     // For empty responses (204 No Content)

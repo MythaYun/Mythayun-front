@@ -31,6 +31,7 @@ export default function MatchesPage() {
   const [activeLeague, setActiveLeague] = useState<LeagueFilter>('All');
   const [activeDateFilter, setActiveDateFilter] = useState<DateFilter>('All');
   const [customDate, setCustomDate] = useState<string>('');
+  const [showDateModal, setShowDateModal] = useState(false);
   
   // User preferences for personalization
   const { 
@@ -45,21 +46,69 @@ export default function MatchesPage() {
   
   // Matches store for API data
   const { 
-    matches, 
-    liveMatches, 
-    isLoading, 
-    error, 
-    fetchMatches, 
-    fetchLiveMatches, 
+    matches,
+    isLoading,
+    error,
+    fetchMatches,
+    fetchMatchesByDate,
+    fetchLiveMatches,
     clearError,
     isCacheValid,
     getCacheAge
   } = useMatchesStore();
   
   // Fetch matches on component mount with smart caching
+  const fetchMatchesForActiveDate = async (forceRefresh = false) => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    let targetDate: string;
+    
+    switch (activeDateFilter) {
+      case 'Today':
+        targetDate = today.toISOString().split('T')[0];
+        break;
+      case 'Tomorrow':
+        targetDate = tomorrow.toISOString().split('T')[0];
+        break;
+      case 'Custom':
+        if (customDate) {
+          targetDate = customDate;
+        } else {
+          targetDate = today.toISOString().split('T')[0];
+        }
+        break;
+      case 'This Week':
+      default:
+        // For 'This Week' and 'All', fetch today's matches and filter on frontend
+        // This is a limitation of the current backend API structure
+        targetDate = today.toISOString().split('T')[0];
+        break;
+    }
+    
+    // Use date-specific fetch for specific dates, general fetch for ranges
+    if (activeDateFilter === 'Today' || activeDateFilter === 'Tomorrow' || activeDateFilter === 'Custom') {
+      await fetchMatchesByDate(targetDate);
+    } else {
+      await fetchMatches(forceRefresh);
+    }
+  };
+  
+  // Initial data fetch
   useEffect(() => {
-    fetchMatches(); // Will use cache if valid, or fetch fresh data
-  }, [fetchMatches]);
+    // Don't auto-fetch for Custom filter - wait for date selection
+    if (activeDateFilter !== 'Custom') {
+      fetchMatchesForActiveDate(); // Will use cache if valid, or fetch fresh data
+    }
+  }, [activeDateFilter]); // Re-fetch when date filter changes (except Custom)
+  
+  // Separate effect for custom date changes
+  useEffect(() => {
+    if (activeDateFilter === 'Custom' && customDate) {
+      fetchMatchesForActiveDate(); // Fetch when custom date is actually selected
+    }
+  }, [customDate]); // Only re-fetch when custom date changes
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -206,7 +255,7 @@ export default function MatchesPage() {
               Live Matches
             </h1>
             <button
-              onClick={() => fetchMatches(true)} // Force refresh
+              onClick={() => fetchMatchesForActiveDate(true)} // Force refresh
               disabled={isLoading}
               className="group relative p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/20 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Refresh matches data"
@@ -259,7 +308,7 @@ export default function MatchesPage() {
                 <button
                   onClick={() => {
                     clearError();
-                    fetchMatches(true); // Force refresh
+                    fetchMatchesForActiveDate(true); // Force refresh
                   }}
                   className="text-red-300 hover:text-red-200 transition-colors"
                 >
@@ -398,7 +447,15 @@ export default function MatchesPage() {
               {(['All', 'Today', 'Tomorrow', 'This Week', 'Custom'] as DateFilter[]).map((dateFilter) => (
                 <button
                   key={dateFilter}
-                  onClick={() => setActiveDateFilter(dateFilter)}
+                  onClick={() => {
+                    if (dateFilter === 'Custom') {
+                      // Open modal for custom date selection
+                      setShowDateModal(true);
+                    } else {
+                      // Normal filter behavior for other options
+                      setActiveDateFilter(dateFilter);
+                    }
+                  }}
                   className={`flex items-center space-x-2 px-3 py-2 rounded-lg font-medium transition-all duration-300 whitespace-nowrap ${
                     activeDateFilter === dateFilter
                       ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg'
@@ -410,18 +467,7 @@ export default function MatchesPage() {
               ))}
             </div>
             
-            {/* Custom Date Picker */}
-            {activeDateFilter === 'Custom' && (
-              <div className="mt-3">
-                <input
-                  type="date"
-                  value={customDate}
-                  onChange={(e) => setCustomDate(e.target.value)}
-                  className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                  placeholder="Select date"
-                />
-              </div>
-            )}
+
           </div>
         </div>
 
@@ -518,6 +564,74 @@ export default function MatchesPage() {
           </>
         )}
       </div>
+
+      {/* Custom Date Picker Modal */}
+      {showDateModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="relative group">
+            {/* Glow effect */}
+            <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/30 to-purple-600/30 rounded-2xl blur-xl opacity-75 group-hover:opacity-100 transition-opacity duration-300"></div>
+            
+            {/* Modal content */}
+            <div className="relative bg-slate-900/95 backdrop-blur-xl rounded-2xl p-6 border border-white/20 shadow-2xl max-w-sm w-full">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-bold text-white flex items-center space-x-2">
+                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
+                  </svg>
+                  <span>Select Date</span>
+                </h3>
+                <button
+                  onClick={() => setShowDateModal(false)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors duration-200"
+                >
+                  <svg className="w-5 h-5 text-white/70 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Date input */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-white/80 mb-2">
+                  Choose a date to view matches
+                </label>
+                <input
+                  type="date"
+                  value={customDate}
+                  onChange={(e) => setCustomDate(e.target.value)}
+                  className="w-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200"
+                  min="2020-01-01"
+                  max="2030-12-31"
+                />
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowDateModal(false)}
+                  className="flex-1 px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-white/80 hover:text-white font-medium transition-all duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (customDate) {
+                      setActiveDateFilter('Custom');
+                      setShowDateModal(false);
+                    }
+                  }}
+                  disabled={!customDate}
+                  className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl text-white font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                >
+                  View Matches
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

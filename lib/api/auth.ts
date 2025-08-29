@@ -7,6 +7,7 @@ import type {
   RefreshTokenRequest,
   User,
   ChangePasswordRequest,
+  SocialAuthRequest,
 } from './types';
 
 /**
@@ -86,9 +87,20 @@ export const authApi = {
    * Delete account
    */
   async deleteAccount(password: string): Promise<{ message: string }> {
-    return apiClient(API_ENDPOINTS.USER.DELETE_ACCOUNT, {
+    return apiClient(API_ENDPOINTS.AUTH.DELETE_ACCOUNT, {
       method: 'DELETE',
       body: JSON.stringify({ password }),
+    });
+  },
+
+  /**
+   * Social authentication (Google, Facebook)
+   */
+  async socialAuth(socialData: SocialAuthRequest): Promise<AuthResponse> {
+    return apiClient<AuthResponse>(API_ENDPOINTS.AUTH.SOCIAL_AUTH, {
+      method: 'POST',
+      body: JSON.stringify(socialData),
+      skipAuth: true,
     });
   },
 };

@@ -4,7 +4,8 @@ import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUserPreferences } from '@/hooks/use-user-preferences';
-import { useMatchDetailsStore } from '@/lib/store/match-details-store';
+import { useMatchDetailsStore, MatchDetails } from '@/lib/store/match-details-store';
+import { useMatchesStore } from '@/lib/store/matches-store';
 import MainNavbar from '@/components/navigation/main-navbar';
 
 // Default fallback values for data not available in Football API
@@ -56,17 +57,143 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
   // Match details store
   const { matchDetails, isLoading, error, fetchMatchDetails, clearMatchDetails } = useMatchDetailsStore();
   
+  // Optimistic UI: Get cached match data for instant display
+  const { getMatchFromCache } = useMatchesStore();
+  const cachedMatch = getMatchFromCache(matchId);
+  
+  // Optimistic UI state: show cached data immediately, then update with full details
+  const [showOptimisticData, setShowOptimisticData] = useState(!!cachedMatch);
+  
+  // Convert cached match data to match details format for optimistic display
+  const createOptimisticMatchDetails = (cachedMatch: any): MatchDetails => {
+    if (!cachedMatch) return null as any;
+    
+    return {
+      // Required MatchDetails properties
+      id: cachedMatch.id,
+      leagueId: 'cached-league',
+      homeTeamId: cachedMatch.homeTeamId || cachedMatch.id + '_home',
+      awayTeamId: cachedMatch.awayTeamId || cachedMatch.id + '_away',
+      venueId: 'cached-venue',
+      kickoffTime: cachedMatch.time || cachedMatch.startTime || new Date().toISOString(),
+      homeTeam: {
+        id: cachedMatch.homeTeamId || cachedMatch.id + '_home',
+        name: cachedMatch.homeTeam,
+        logo: null // Will be filled when full data loads
+      },
+      awayTeam: {
+        id: cachedMatch.awayTeamId || cachedMatch.id + '_away',
+        name: cachedMatch.awayTeam,
+        logo: null // Will be filled when full data loads
+      },
+      league: {
+        id: 'cached',
+        name: cachedMatch.league,
+        logo: null
+      },
+      // Store scores at the match level, not team level (matching API structure)
+      score: {
+        home: cachedMatch.homeScore,
+        away: cachedMatch.awayScore
+      },
+      status: cachedMatch.status,
+      startTime: cachedMatch.time,
+      minute: cachedMatch.status === 'live' ? cachedMatch.time : null,
+      venue: cachedMatch.venue || 'Stadium TBD',
+      // Required arrays/objects with defaults
+      events: [], // Empty events for optimistic display
+      statistics: defaultValues.stats, // Use default stats
+
+      // Optional properties with defaults
+      attendance: null,
+      referee: null,
+      lineups: null,
+      stadium: defaultValues.stadium,
+      weather: defaultValues.weather,
+      // Override with any additional cached data
+      round: cachedMatch.round,
+      season: cachedMatch.season
+    } as unknown as MatchDetails;
+  };
+  
   // Fetch match details on component mount
   useEffect(() => {
     if (matchId) {
-      fetchMatchDetails(matchId);
+      // If we have cached data, show it immediately while fetching full details
+      if (cachedMatch) {
+        console.log('🚀 Optimistic UI: Using cached match data for instant display');
+        setShowOptimisticData(true);
+      }
+      
+      // Always fetch full details in background
+      fetchMatchDetails(matchId).then(() => {
+        // Once full details are loaded, hide optimistic data
+        setShowOptimisticData(false);
+      });
     }
     
     // Cleanup on unmount
     return () => {
       clearMatchDetails();
+      setShowOptimisticData(false);
     };
-  }, [matchId, fetchMatchDetails, clearMatchDetails]);
+  }, [matchId, fetchMatchDetails, clearMatchDetails, cachedMatch]);
+  
+  // Use match details from API with comprehensive fallback data
+  // Optimistic UI: Use cached data for instant display, then real API data
+  // Note: This creates a display object that may not be a complete MatchDetails
+  const match = useMemo((): any => {
+    // Priority: 1. Real API data, 2. Optimistic cached data, 3. null
+    let sourceData = matchDetails;
+    let isOptimistic = false;
+    
+    if (!matchDetails && showOptimisticData && cachedMatch) {
+      sourceData = createOptimisticMatchDetails(cachedMatch);
+      isOptimistic = true;
+      console.log('🚀 Optimistic UI: Displaying cached match data');
+    }
+    
+    if (!sourceData) return null;
+
+    // Cast to any for legacy compatibility during refactor
+    const legacyMatch = sourceData as any;
+
+    return {
+      ...sourceData,
+      // Use EXACT same data structure as matches page for consistency
+      homeScore: sourceData.score?.home ?? null,
+      awayScore: sourceData.score?.away ?? null,
+      // Use same time logic as matches page: if minute exists, show it with apostrophe
+      time: sourceData.minute ? `${sourceData.minute}'` : 
+            sourceData.startTime ? new Date(sourceData.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) :
+            'To Be Determined',
+      // Map backend status to frontend status (backend uses 1H, 2H, LIVE, etc.)
+      status: ['1H', '2H', 'LIVE', 'HT'].includes(sourceData.status) ? 'live' : 
+              ['FT', 'AET', 'PEN'].includes(sourceData.status) ? 'finished' : 'not_started',
+      // Stadium data: Use real venue data from Football API when available
+      stadium: {
+        name: legacyMatch.venue?.name || sourceData.stadium?.name || sourceData.venue || 'Stadium',
+        location: legacyMatch.venue?.city || sourceData.stadium?.location || 'Location not available',
+        capacity: sourceData.stadium?.capacity || defaultValues.stadium.capacity,
+        image: sourceData.stadium?.image || defaultValues.stadium.image,
+        architect: sourceData.stadium?.architect || defaultValues.stadium.architect,
+        cost: sourceData.stadium?.cost || defaultValues.stadium.cost,
+        nickname: sourceData.stadium?.nickname || defaultValues.stadium.nickname,
+        opened: sourceData.stadium?.opened || defaultValues.stadium.opened
+      },
+      // Weather data: Not available in Football API, show as unavailable
+      weather: sourceData.weather || defaultValues.weather,
+      // Statistics data: Use real statistics from Football API when available
+      statistics: sourceData.statistics || defaultValues.stats,
+      // Events data: Use real events from Football API when available
+      events: sourceData.events || [],
+      // Lineups data: Use real lineups from Football API when available
+      lineups: sourceData.lineups || null,
+      // Additional data: Use real data from Football API when available
+      attendance: sourceData.attendance || null,
+      referee: sourceData.referee || 'Unknown'
+    };
+  }, [matchDetails, showOptimisticData, cachedMatch]);
   
   // Loading state
   if (isLoading) {
@@ -140,86 +267,6 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
   
-  // Use match details from API with comprehensive fallback data
-  // Use real API data from backend, with intelligent fallbacks for unavailable data
-  const match = useMemo(() => {
-    if (!matchDetails) return null;
-
-    // Cast to any for legacy compatibility during refactor
-    const legacyMatch = matchDetails as any;
-
-    // Default values for missing data
-    const defaultValues = {
-      stadium: {
-        image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&h=400&fit=crop',
-        architect: 'Information not available',
-        cost: 'Information not available',
-        nickname: 'Stadium',
-        capacity: null,
-        opened: null
-      },
-      weather: {
-        temperature: null,
-        condition: 'Information not available',
-        humidity: null,
-        windSpeed: null
-      },
-      stats: {
-        possession: { home: null, away: null },
-        shots: {
-          home: { total: null, onTarget: null, offTarget: null, blocked: null },
-          away: { total: null, onTarget: null, offTarget: null, blocked: null }
-        },
-        corners: { home: null, away: null },
-        fouls: { home: null, away: null },
-        yellowCards: { home: null, away: null },
-        redCards: { home: null, away: null },
-        offsides: { home: null, away: null },
-        passes: {
-          home: { total: null, accurate: null, percentage: null },
-          away: { total: null, accurate: null, percentage: null }
-        },
-        saves: { home: null, away: null }
-      }
-    };
-
-    return {
-      ...matchDetails,
-      // Stadium data: Use real venue data from Football API when available
-      stadium: {
-        name: legacyMatch.venue?.name || matchDetails.stadium?.name || 'Stadium',
-        location: legacyMatch.venue?.city || matchDetails.stadium?.location || 'Location not available',
-        capacity: matchDetails.stadium?.capacity || defaultValues.stadium.capacity,
-        image: matchDetails.stadium?.image || defaultValues.stadium.image,
-        architect: matchDetails.stadium?.architect || defaultValues.stadium.architect,
-        cost: matchDetails.stadium?.cost || defaultValues.stadium.cost,
-        nickname: matchDetails.stadium?.nickname || defaultValues.stadium.nickname,
-        opened: matchDetails.stadium?.opened || defaultValues.stadium.opened
-      },
-      // Weather data: Not available in Football API, show as unavailable
-      weather: matchDetails.weather || defaultValues.weather,
-      // Events: Use real match events from Football API
-      events: matchDetails.events || [],
-      // Stats: Now available from advanced Football API integration
-      stats: {
-        possession: matchDetails.statistics?.possession || defaultValues.stats.possession,
-        shots: matchDetails.statistics?.shots || defaultValues.stats.shots,
-        corners: matchDetails.statistics?.corners || defaultValues.stats.corners,
-        fouls: matchDetails.statistics?.fouls || defaultValues.stats.fouls,
-        yellowCards: matchDetails.statistics?.yellowCards || defaultValues.stats.yellowCards,
-        redCards: matchDetails.statistics?.redCards || defaultValues.stats.redCards,
-        offsides: matchDetails.statistics?.offsides || defaultValues.stats.offsides,
-        passes: matchDetails.statistics?.passes || defaultValues.stats.passes,
-        saves: matchDetails.statistics?.saves || defaultValues.stats.saves
-      },
-      lineups: matchDetails.lineups || {
-        home: { formation: '4-4-2', players: [] },
-        away: { formation: '4-4-2', players: [] }
-      },
-      attendance: matchDetails.attendance || 0,
-      referee: matchDetails.referee || 'Unknown'
-    };
-  }, [matchDetails]);
 
   if (!match) {
     return <div>Loading...</div>;
@@ -265,7 +312,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                    match.time}
                 </span>
                 <span className="text-white/60">•</span>
-                <span className="text-white/60">{match.league}</span>
+                <span className="text-white/60">{match.league?.name || 'League'}</span>
                 <span className="text-white/60">•</span>
                 <span className="text-white/60">{match.stadium.name}</span>
               </div>
@@ -307,15 +354,15 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
               <div className="flex flex-col items-center px-8">
                 <div className="flex items-center space-x-4 mb-2">
                   <div className={`text-5xl font-black transition-colors duration-300 ${
-                    match.status === 'live' ? 'text-red-400' : 'text-white'
+                    match.status === 'in_progress' ? 'text-red-400' : 'text-white'
                   }`}>
-                    {match.homeTeam.score}
+                    {match.homeScore ?? 0}
                   </div>
                   <div className="text-3xl font-light text-white/60">-</div>
                   <div className={`text-5xl font-black transition-colors duration-300 ${
-                    match.status === 'live' ? 'text-red-400' : 'text-white'
+                    match.status === 'in_progress' ? 'text-red-400' : 'text-white'
                   }`}>
-                    {match.awayTeam.score}
+                    {match.awayScore ?? 0}
                   </div>
                 </div>
                 {match.status === 'live' && (
@@ -417,7 +464,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                   </svg>
                 </div>
                 <div>
-                  <div className="text-white font-semibold">{match.attendance.toLocaleString()}</div>
+                  <div className="text-white font-semibold">{match.attendance ? match.attendance.toLocaleString() : 'N/A'}</div>
                   <div className="text-white/60 text-sm">Attendance</div>
                 </div>
               </div>
@@ -490,7 +537,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                 <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
                   <h3 className="text-white font-bold text-xl mb-6">Match Events</h3>
                   <div className="space-y-4">
-                    {match.events.map((event, index) => (
+                    {match.events.map((event: { id: string; minute: number; type: string; playerName: string; assistPlayerName?: string; teamId: string }, index: number) => (
                       <div key={`${event.id}-${index}`} className="flex items-center space-x-4 group/event">
                         <div className="flex flex-col items-center">
                           <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
@@ -513,12 +560,12 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                               <div className="w-6 h-8 bg-yellow-400 rounded-sm"></div>
                             )}
                             <div>
-                              <div className="text-white font-semibold">{event.player}</div>
-                              {event.assist && (
-                                <div className="text-white/60 text-sm">Assist: {event.assist}</div>
+                              <div className="text-white font-semibold">{event.playerName || 'Unknown Player'}</div>
+                              {event.assistPlayerName && (
+                                <div className="text-white/60 text-sm">Assist: {event.assistPlayerName}</div>
                               )}
                               <div className="text-white/60 text-xs capitalize">
-                                {event.team === 'home' ? match.homeTeam.name : match.awayTeam.name}
+                                {event.teamId === match.homeTeam.id ? match.homeTeam.name : match.awayTeam.name}
                               </div>
                             </div>
                           </div>
@@ -757,9 +804,9 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-cyan-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
                 <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-lg mb-4">{match.homeTeam.name} ({match.lineups.home.formation})</h3>
+                  <h3 className="text-white font-bold text-lg mb-4">{match.homeTeam.name} ({match.lineups?.home?.formation || '4-4-2'})</h3>
                   <div className="space-y-3">
-                    {match.lineups.home.players.map((player) => (
+                    {(match.lineups?.home?.players || []).map((player: { number: number; name: string; position: string }) => (
                       <div key={player.number} className="flex items-center space-x-3 p-2 bg-white/5 rounded-lg hover:bg-white/10 transition-colors duration-300">
                         <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
                           {player.number}
@@ -777,9 +824,9 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl blur-lg opacity-0 group-hover:opacity-50 transition-opacity duration-300"></div>
                 <div className="relative bg-white/5 backdrop-blur-xl rounded-xl p-6 border border-white/20">
-                  <h3 className="text-white font-bold text-lg mb-4">{match.awayTeam.name} ({match.lineups.away.formation})</h3>
+                  <h3 className="text-white font-bold text-lg mb-4">{match.awayTeam.name} ({match.lineups?.away?.formation || '4-4-2'})</h3>
                   <div className="space-y-3">
-                    {match.lineups.away.players.map((player) => (
+                    {(match.lineups?.away?.players || []).map((player: { number: number; name: string; position: string }) => (
                       <div key={player.number} className="flex items-center space-x-3 p-2 bg-white/5 rounded-lg hover:bg-white/10 transition-colors duration-300">
                         <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
                           {player.number}
@@ -880,7 +927,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                       </div>
                       <div className="flex justify-between">
                         <span className="text-white/60">Competition:</span>
-                        <span className="text-white font-semibold">{match.league}</span>
+                        <span className="text-white font-semibold">{match.league?.name || 'League'}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-white/60">Weather:</span>
@@ -893,7 +940,7 @@ export default function MatchDetailPage({ params }: { params: Promise<{ id: stri
                       </div>
                       <div className="flex justify-between">
                         <span className="text-white/60">Expected Attendance:</span>
-                        <span className="text-white font-semibold">{match.attendance.toLocaleString()}</span>
+                        <span className="text-white font-semibold">{match.attendance ? match.attendance.toLocaleString() : 'N/A'}</span>
                       </div>
                     </div>
                   </div>
