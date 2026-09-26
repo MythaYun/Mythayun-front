@@ -52,7 +52,9 @@ export default function LoginPage() {
       }
     } catch (err) {
       console.error(`${provider} OAuth initiation failed:`, err);
-      // Could show an error toast here
+      useAuthStore.getState().setError(
+        err instanceof Error ? err.message : `Could not start ${provider} login`
+      );
     }
   };
 
