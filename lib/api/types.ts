@@ -30,12 +30,13 @@ export interface RefreshTokenRequest {
   refreshToken: string;
 }
 
+// The backend exchanges the OAuth code with the provider itself, so the
+// client never sends (or can spoof) who the user is.
 export interface SocialAuthRequest {
-  provider: 'google' | 'facebook' | 'apple';
-  providerId: string;
-  email: string;
-  name: string;
-  avatar?: string;
+  provider: 'google' | 'facebook';
+  code: string;
+  redirectUri: string;
+  codeVerifier?: string;
 }
 
 // User Types

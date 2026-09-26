@@ -5,36 +5,21 @@
  * No external dependencies - uses native browser APIs for maximum compatibility
  */
 
-// OAuth Configuration
+import type { SocialAuthRequest } from '@/lib/api/types'
+
+// OAuth Configuration. Only public client IDs live here: the code-for-token
+// exchange needs the client secret, so the backend performs it.
 const OAUTH_CONFIG = {
   google: {
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenUrl: 'https://oauth2.googleapis.com/token',
-    userInfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
     scope: 'openid email profile',
     clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '',
   },
   facebook: {
-    authUrl: 'https://www.facebook.com/v18.0/dialog/oauth',
-    tokenUrl: 'https://graph.facebook.com/v18.0/oauth/access_token',
-    userInfoUrl: 'https://graph.facebook.com/me',
+    authUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
     scope: 'email,public_profile',
     clientId: process.env.NEXT_PUBLIC_FACEBOOK_APP_ID || '',
   }
-}
-
-// OAuth Types
-export interface OAuthUser {
-  id: string
-  email: string
-  name: string
-  picture?: string
-}
-
-export interface OAuthResult {
-  provider: 'google' | 'facebook'
-  user: OAuthUser
-  accessToken: string
 }
 
 // Utility functions for PKCE (Google)
@@ -149,16 +134,11 @@ export class OAuthService {
   }
 
   /**
-   * Handle Google OAuth callback
+   * Handle Google OAuth callback: validate state and build the request the
+   * backend uses to exchange the code with Google.
    */
-  async handleGoogleCallback(code: string, state: string): Promise<OAuthResult> {
-    const config = OAUTH_CONFIG.google
-    
-    // Verify state parameter
-    const storedState = sessionStorage.getItem('oauth_state')
-    if (state !== storedState) {
-      throw new Error('Invalid state parameter - possible CSRF attack')
-    }
+  handleGoogleCallback(code: string, state: string): SocialAuthRequest {
+    this.verifyState(state)
 
     // Get stored PKCE verifier
     const codeVerifier = sessionStorage.getItem('oauth_code_verifier')
@@ -166,108 +146,38 @@ export class OAuthService {
       throw new Error('Missing code verifier - invalid OAuth flow')
     }
 
-    // Exchange code for access token
-    const tokenResponse = await fetch(config.tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: config.clientId,
-        client_secret: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET || '',
-        code: code,
-        code_verifier: codeVerifier,
-        grant_type: 'authorization_code',
-        redirect_uri: `${window.location.origin}/auth/callback/google`,
-      }),
-    })
-
-    if (!tokenResponse.ok) {
-      throw new Error('Failed to exchange code for token')
-    }
-
-    const tokenData = await tokenResponse.json()
-    
-    // Get user info
-    const userResponse = await fetch(`${config.userInfoUrl}?access_token=${tokenData.access_token}`)
-    
-    if (!userResponse.ok) {
-      throw new Error('Failed to fetch user info')
-    }
-
-    const userData = await userResponse.json()
-
-    // Clean up session storage
-    sessionStorage.removeItem('oauth_code_verifier')
-    sessionStorage.removeItem('oauth_state')
-    sessionStorage.removeItem('oauth_provider')
+    this.clearSession()
 
     return {
       provider: 'google',
-      user: {
-        id: userData.id,
-        email: userData.email,
-        name: userData.name,
-        picture: userData.picture
-      },
-      accessToken: tokenData.access_token
+      code,
+      codeVerifier,
+      redirectUri: `${window.location.origin}/auth/callback/google`,
     }
   }
 
   /**
-   * Handle Facebook OAuth callback
+   * Handle Facebook OAuth callback: validate state and build the request the
+   * backend uses to exchange the code with Facebook.
    */
-  async handleFacebookCallback(code: string, state: string): Promise<OAuthResult> {
-    const config = OAUTH_CONFIG.facebook
-    
-    // Verify state parameter
-    const storedState = sessionStorage.getItem('oauth_state')
-    if (state !== storedState) {
-      throw new Error('Invalid state parameter - possible CSRF attack')
-    }
-
-    // Exchange code for access token
-    const tokenResponse = await fetch(config.tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: config.clientId,
-        client_secret: process.env.NEXT_PUBLIC_FACEBOOK_APP_SECRET || '',
-        code: code,
-        redirect_uri: `${window.location.origin}/auth/callback/facebook`,
-      }),
-    })
-
-    if (!tokenResponse.ok) {
-      throw new Error('Failed to exchange code for token')
-    }
-
-    const tokenData = await tokenResponse.json()
-    
-    // Get user info
-    const userResponse = await fetch(`${config.userInfoUrl}?fields=id,name,email,picture&access_token=${tokenData.access_token}`)
-    
-    if (!userResponse.ok) {
-      throw new Error('Failed to fetch user info')
-    }
-
-    const userData = await userResponse.json()
-
-    // Clean up session storage
-    sessionStorage.removeItem('oauth_state')
-    sessionStorage.removeItem('oauth_provider')
+  handleFacebookCallback(code: string, state: string): SocialAuthRequest {
+    this.verifyState(state)
+    this.clearSession()
 
     return {
       provider: 'facebook',
-      user: {
-        id: userData.id,
-        email: userData.email,
-        name: userData.name,
-        picture: userData.picture?.data?.url
-      },
-      accessToken: tokenData.access_token
+      code,
+      redirectUri: `${window.location.origin}/auth/callback/facebook`,
+    }
+  }
+
+  /**
+   * Reject callbacks whose state doesn't match the one we generated (CSRF)
+   */
+  private verifyState(state: string): void {
+    const storedState = sessionStorage.getItem('oauth_state')
+    if (!storedState || state !== storedState) {
+      throw new Error('Invalid state parameter - possible CSRF attack')
     }
   }
 
