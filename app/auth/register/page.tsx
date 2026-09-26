@@ -12,6 +12,9 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
 
+// Facebook sign-up is hidden until the Facebook app is configured.
+const SHOW_FACEBOOK_AUTH = false;
+
 export default function RegisterPage() {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
@@ -289,6 +292,7 @@ export default function RegisterPage() {
                     </div>
                   </Button>
                 </div>
+                {SHOW_FACEBOOK_AUTH && (
                 <div className="relative group flex-1">
                   <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-xl blur-sm opacity-0 group-hover:opacity-60 transition-opacity duration-300"></div>
                   <Button 
@@ -307,8 +311,9 @@ export default function RegisterPage() {
                     </div>
                   </Button>
                 </div>
+                )}
               </div>
-              
+
               <div className="text-center">
                 <p className="text-white/70 text-sm">
                   Already have an account?{" "}

@@ -12,6 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
+// Facebook login is hidden until the Facebook app is configured.
+const SHOW_FACEBOOK_AUTH = false;
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -219,6 +222,7 @@ export default function LoginPage() {
                     </div>
                   </Button>
                 </div>
+                {SHOW_FACEBOOK_AUTH && (
                 <div className="relative group flex-1">
                   <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-xl blur-sm opacity-0 group-hover:opacity-60 transition-opacity duration-300"></div>
                   <Button 
@@ -237,6 +241,7 @@ export default function LoginPage() {
                     </div>
                     </Button>
                 </div>
+                )}
               </div>
               
               <div className="text-center">
