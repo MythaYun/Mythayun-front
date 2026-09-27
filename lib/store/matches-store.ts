@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { matchesApi } from '@/lib/api';
 import type { Fixture } from '@/lib/api';
+import { describeFixtureStatus, isLiveFixture } from '@/lib/match-status';
 
 export interface Match {
   id: string;
@@ -45,27 +46,7 @@ interface MatchesState {
 
 // Helper function to convert real API fixture to our Match interface
 const convertFixtureToMatch = (fixture: any): Match => {
-  // Determine status based on real API data
-  let status: 'live' | 'upcoming' | 'finished' = 'upcoming';
-  let time = 'TBD';
-  
-  // Map real API status values
-  if (fixture.status === 'LIVE' || fixture.phase === 'FIRST_HALF' || fixture.phase === 'SECOND_HALF') {
-    status = 'live';
-    time = fixture.minute ? `${fixture.minute}'` : 'LIVE';
-  } else if (fixture.status === 'FT' || fixture.phase === 'FULL_TIME') {
-    status = 'finished';
-    time = 'FT';
-  } else if (fixture.status === 'NS' || fixture.phase === 'NOT_STARTED') {
-    status = 'upcoming';
-    if (fixture.startTime) {
-      const kickoff = new Date(fixture.startTime);
-      time = kickoff.toLocaleTimeString('fr-FR', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    }
-  }
+  const { status, time } = describeFixtureStatus(fixture);
 
   return {
     id: fixture.id,
@@ -179,11 +160,7 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
       }
       
       // Filter for live matches only
-      const liveFixtures = fixturesArray.filter(fixture => 
-        fixture.status === 'LIVE' || 
-        fixture.phase === 'FIRST_HALF' || 
-        fixture.phase === 'SECOND_HALF'
-      );
+      const liveFixtures = fixturesArray.filter(isLiveFixture);
       
       const liveMatches = liveFixtures.map(convertFixtureToMatch);
       
