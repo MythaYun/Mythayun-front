@@ -4,12 +4,16 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/lib/store/auth-store';
+import { oauthService } from '@/lib/oauth';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
+
+// Facebook sign-up is hidden until the Facebook app is configured.
+const SHOW_FACEBOOK_AUTH = false;
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -48,14 +52,21 @@ export default function RegisterPage() {
     }
   };
   
-  // Handler for social authentication
+  // Handler for social authentication. Sign-up and login share one flow:
+  // the backend creates the account on first sign-in and flags isNewUser,
+  // which sends the user to onboarding.
   const handleSocialRegister = async (provider: 'google' | 'facebook') => {
-    // TODO: Implement social registration with backend API
-    // For now, redirect to OAuth provider URL when backend supports it
-    console.log(`Social registration with ${provider} - Not implemented yet`);
-    
-    // In production, this would redirect to:
-    // window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/${provider}/register`;
+    setError(null);
+    try {
+      if (provider === 'google') {
+        await oauthService.initiateGoogleAuth();
+      } else {
+        await oauthService.initiateFacebookAuth();
+      }
+    } catch (err) {
+      console.error(`${provider} OAuth initiation failed:`, err);
+      setError(err instanceof Error ? err.message : `Could not start ${provider} sign-up`);
+    }
   };
 
   return (
@@ -281,6 +292,7 @@ export default function RegisterPage() {
                     </div>
                   </Button>
                 </div>
+                {SHOW_FACEBOOK_AUTH && (
                 <div className="relative group flex-1">
                   <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 rounded-xl blur-sm opacity-0 group-hover:opacity-60 transition-opacity duration-300"></div>
                   <Button 
@@ -299,8 +311,9 @@ export default function RegisterPage() {
                     </div>
                   </Button>
                 </div>
+                )}
               </div>
-              
+
               <div className="text-center">
                 <p className="text-white/70 text-sm">
                   Already have an account?{" "}

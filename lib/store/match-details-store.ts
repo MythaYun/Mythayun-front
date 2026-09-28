@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { matchesApi } from '@/lib/api';
 import type { Fixture } from '@/lib/api';
+import { describeFixtureStatus } from '@/lib/match-status';
 
 // Extend the basic Match interface with additional details
 export interface MatchDetails {
@@ -65,27 +66,15 @@ interface MatchDetailsState {
 
 // Convert API fixture to MatchDetails (same logic as matches-store + additional fields)
 const convertApiToMatchDetails = (fixture: any): MatchDetails => {
-  // Determine status based on real API data (SAME AS MATCHES-STORE)
-  let status: 'live' | 'upcoming' | 'finished' = 'upcoming';
-  let time = 'TBD';
-  
-  // Map real API status values (SAME AS MATCHES-STORE)
-  if (fixture.status === 'LIVE' || fixture.phase === 'FIRST_HALF' || fixture.phase === 'SECOND_HALF') {
-    status = 'live';
-    time = fixture.minute ? `${fixture.minute}'` : 'LIVE';
-  } else if (fixture.status === 'FT' || fixture.phase === 'FULL_TIME') {
-    status = 'finished';
-    time = 'FT';
-  } else if (fixture.status === 'NS' || fixture.phase === 'NOT_STARTED') {
-    status = 'upcoming';
-    if (fixture.startTime) {
-      const kickoff = new Date(fixture.startTime);
-      time = kickoff.toLocaleTimeString('fr-FR', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-    }
-  }
+  const { status, time } = describeFixtureStatus(fixture);
+
+  // The API sends shots per team ({ home: { total, onTarget, ... } }); the page
+  // reads them per measure ({ total: { home, away }, ... })
+  const shots = fixture.statistics?.shots;
+  const shotsByMeasure = (measure: 'total' | 'onTarget' | 'offTarget' | 'blocked') => ({
+    home: shots?.home?.[measure] ?? null,
+    away: shots?.away?.[measure] ?? null,
+  });
 
   return {
     // Basic fields (SAME AS MATCHES-STORE)
@@ -117,14 +106,24 @@ const convertApiToMatchDetails = (fixture: any): MatchDetails => {
     })) || [],
     statistics: fixture.statistics ? {
       possession: fixture.statistics.possession || { home: null, away: null },
-      shots: fixture.statistics.shots || { home: null, away: null },
+      shots: {
+        total: shotsByMeasure('total'),
+        onTarget: shotsByMeasure('onTarget'),
+        offTarget: shotsByMeasure('offTarget'),
+        blocked: shotsByMeasure('blocked'),
+      },
       corners: fixture.statistics.corners || { home: null, away: null },
       fouls: fixture.statistics.fouls || { home: null, away: null },
       yellowCards: fixture.statistics.yellowCards || { home: null, away: null },
       redCards: fixture.statistics.redCards || { home: null, away: null },
     } : {
       possession: { home: null, away: null },
-      shots: { home: null, away: null },
+      shots: {
+        total: shotsByMeasure('total'),
+        onTarget: shotsByMeasure('onTarget'),
+        offTarget: shotsByMeasure('offTarget'),
+        blocked: shotsByMeasure('blocked'),
+      },
       corners: { home: null, away: null },
       fouls: { home: null, away: null },
       yellowCards: { home: null, away: null },

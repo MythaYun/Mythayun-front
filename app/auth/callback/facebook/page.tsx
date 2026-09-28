@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { oauthService } from '@/lib/oauth'
 import { authApi } from '@/lib/api/auth'
@@ -13,8 +13,13 @@ function FacebookCallbackContent() {
   const [error, setError] = useState<string>('')
   
   const { setUser, setTokens, setLoading, setError: setAuthError } = useAuthStore()
+  // OAuth codes are single-use; React Strict Mode runs effects twice in dev
+  const handled = useRef(false)
 
   useEffect(() => {
+    if (handled.current) return
+    handled.current = true
+
     const handleCallback = async () => {
       try {
         setLoading(true)
@@ -33,18 +38,9 @@ function FacebookCallbackContent() {
           throw new Error('Missing OAuth parameters')
         }
 
-        // Handle OAuth callback and get user data
-        console.log('🚀 Using real Facebook OAuth with backend integration')
-        const oauthResult = await oauthService.handleFacebookCallback(code, state)
-        
-        // Send user data to backend for authentication
-        const authResponse = await authApi.socialAuth({
-          provider: 'facebook',
-          providerId: oauthResult.user.id,
-          email: oauthResult.user.email,
-          name: oauthResult.user.name,
-          avatar: oauthResult.user.picture
-        })
+        // Validate state, then let the backend exchange the code with Facebook
+        const exchange = oauthService.handleFacebookCallback(code, state)
+        const authResponse = await authApi.socialAuth(exchange)
 
         // Store user and tokens in auth store
         setUser(authResponse.user)
