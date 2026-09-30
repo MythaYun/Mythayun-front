@@ -49,7 +49,7 @@ interface MatchesState {
 
 const MATCHES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-// Only the most recent multi-day request may update the list: answers to an
+// Only the most recent request may update the list: answers to an
 // older request (the visitor changed filter meanwhile) are dropped.
 let latestDatesRequest = 0;
 
@@ -97,8 +97,10 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
     await get().fetchMatchesForDates([new Date().toISOString().split('T')[0]], forceRefresh);
   },
 
-  // Matches of one or several UTC days, loaded in parallel and merged.
+  // Matches of one or several consecutive UTC days, loaded with a single request.
   fetchMatchesForDates: async (dates: string[], forceRefresh = false) => {
+    if (dates.length === 0) return;
+
     const state = get();
     const cacheKey = dates.join(',');
 
@@ -117,50 +119,40 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
     const requestId = ++latestDatesRequest;
     set({ isLoading: true, error: null });
 
-    const results = await Promise.allSettled(dates.map((date) => matchesApi.getFixtures({ date })));
-    if (requestId !== latestDatesRequest) return; // a newer request replaced this one
+    try {
+      // One day: the classic date query. Several days: one range query, which
+      // costs the football provider one request per league however long it is.
+      const response = dates.length === 1
+        ? await matchesApi.getFixtures({ date: dates[0] })
+        : await matchesApi.getFixtures({ from: dates[0], to: dates[dates.length - 1] });
+      if (requestId !== latestDatesRequest) return; // a newer request replaced this one
 
-    const fixtures: any[] = [];
-    let failures = 0;
-    let firstError = '';
-    results.forEach((result) => {
-      if (result.status === 'rejected') {
-        failures++;
-        firstError = firstError || (result.reason?.message ?? 'Failed to fetch matches');
-        return;
+      const fixtures = extractFixtures(response);
+      if (!fixtures) {
+        throw new Error('Invalid API response: no fixtures data found');
       }
-      const day = extractFixtures(result.value);
-      if (day) {
-        fixtures.push(...day);
-      } else {
-        failures++;
-        firstError = firstError || 'Invalid API response: no fixtures data found';
-      }
-    });
 
-    // Every day failed: nothing to show. Some days failed: show the others.
-    if (failures === dates.length) {
-      console.error('Failed to fetch matches:', firstError);
-      set({ isLoading: false, error: firstError || 'Failed to fetch matches' });
-      return;
+      // A match can only appear once, whatever the provider sent
+      const unique = new Map<string, any>();
+      fixtures.forEach((fixture) => unique.set(fixture.id, fixture));
+      const matches = [...unique.values()]
+        .sort((a, b) => String(a.startTime ?? '').localeCompare(String(b.startTime ?? '')))
+        .map(convertFixtureToMatch);
+
+      set({
+        matches,
+        isLoading: false,
+        lastUpdated: new Date(),
+        cacheKey,
+      });
+    } catch (error: any) {
+      if (requestId !== latestDatesRequest) return;
+      console.error('Failed to fetch matches:', error);
+      set({
+        isLoading: false,
+        error: error.message || 'Failed to fetch matches',
+      });
     }
-    if (failures > 0) {
-      console.warn(`${failures}/${dates.length} days could not be loaded:`, firstError);
-    }
-
-    // A match can be returned by two neighbouring days: keep one copy
-    const unique = new Map<string, any>();
-    fixtures.forEach((fixture) => unique.set(fixture.id, fixture));
-    const matches = [...unique.values()]
-      .sort((a, b) => String(a.startTime ?? '').localeCompare(String(b.startTime ?? '')))
-      .map(convertFixtureToMatch);
-
-    set({
-      matches,
-      isLoading: false,
-      lastUpdated: failures > 0 ? null : new Date(), // partial answers are not cached
-      cacheKey: failures > 0 ? null : cacheKey,
-    });
   },
 
   fetchLiveMatches: async (forceRefresh = false) => {

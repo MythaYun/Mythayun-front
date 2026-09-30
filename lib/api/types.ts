@@ -309,6 +309,8 @@ export interface ApiError {
 // Query Parameters
 export interface FixturesQueryParams {
   date?: string; // YYYY-MM-DD
+  from?: string; // YYYY-MM-DD, first UTC day of a range (send with `to`, 14 days at most)
+  to?: string; // YYYY-MM-DD, last UTC day of a range
   league?: string;
   team?: string;
   limit?: number;

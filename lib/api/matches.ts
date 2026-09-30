@@ -17,6 +17,8 @@ export const matchesApi = {
     const searchParams = new URLSearchParams();
     
     if (params?.date) searchParams.append('date', params.date);
+    if (params?.from) searchParams.append('from', params.from);
+    if (params?.to) searchParams.append('to', params.to);
     if (params?.league) searchParams.append('league', params.league);
     if (params?.team) searchParams.append('team', params.team);
     if (params?.limit) searchParams.append('limit', params.limit.toString());
