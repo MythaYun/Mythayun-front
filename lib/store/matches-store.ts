@@ -12,7 +12,8 @@ export interface Match {
   status: 'live' | 'upcoming' | 'finished';
   time: string;
   league: string;
-  date: string;
+  date: string; // UTC day of the kick-off
+  startTime?: string | null; // Kick-off as sent by the API (ISO), used to filter by the visitor's local day
   minute?: number | null; // Current match minute for live matches
   // Additional fields from API
   homeTeamId?: string;
@@ -28,9 +29,11 @@ interface MatchesState {
   isLoading: boolean;
   error: string | null;
   lastUpdated: Date | null;
-  
+  cacheKey: string | null; // UTC days the cached matches were loaded for
+
   // Actions
   fetchMatches: (forceRefresh?: boolean) => Promise<void>;
+  fetchMatchesForDates: (dates: string[], forceRefresh?: boolean) => Promise<void>;
   fetchLiveMatches: (forceRefresh?: boolean) => Promise<void>;
   fetchMatchesByDate: (date: string) => Promise<void>;
   fetchMatchesByTeam: (teamId: string) => Promise<void>;
@@ -43,6 +46,19 @@ interface MatchesState {
   // Optimistic UI
   getMatchFromCache: (matchId: string) => Match | null;
 }
+
+const MATCHES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Only the most recent multi-day request may update the list: answers to an
+// older request (the visitor changed filter meanwhile) are dropped.
+let latestDatesRequest = 0;
+
+// Extracts the fixtures array from an API answer (direct array or { fixtures })
+const extractFixtures = (response: any): any[] | null => {
+  if (Array.isArray(response)) return response;
+  if (response && Array.isArray(response.fixtures)) return response.fixtures;
+  return null;
+};
 
 // Helper function to convert real API fixture to our Match interface
 const convertFixtureToMatch = (fixture: any): Match => {
@@ -58,6 +74,7 @@ const convertFixtureToMatch = (fixture: any): Match => {
     time,
     league: fixture.league?.name || 'Unknown League',
     date: fixture.startTime ? fixture.startTime.split('T')[0] : new Date().toISOString().split('T')[0],
+    startTime: fixture.startTime ?? null,
     minute: fixture.currentMinute || fixture.minute || null, // Map current minute from API
     homeTeamId: fixture.homeTeam?.id,
     awayTeamId: fixture.awayTeam?.id,
@@ -73,75 +90,98 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
   isLoading: true, // Start with loading true for immediate UX
   error: null,
   lastUpdated: null,
+  cacheKey: null,
 
+  // Today's matches (UTC day, like the API default). Used by the home page.
   fetchMatches: async (forceRefresh = false) => {
+    await get().fetchMatchesForDates([new Date().toISOString().split('T')[0]], forceRefresh);
+  },
+
+  // Matches of one or several UTC days, loaded in parallel and merged.
+  fetchMatchesForDates: async (dates: string[], forceRefresh = false) => {
     const state = get();
-    
-    // Check cache validity (5 minutes TTL for matches)
-    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    const isCacheValid = state.lastUpdated && 
-      (Date.now() - state.lastUpdated.getTime()) < CACHE_TTL;
-    
-    // If cache is valid and we have data, don't fetch unless forced
-    if (!forceRefresh && isCacheValid && state.matches.length > 0) {
+    const cacheKey = dates.join(',');
+
+    // The cache only counts for the very same days: switching from "Tomorrow"
+    // to "Today" must not show tomorrow's matches.
+    const isCacheValid = state.lastUpdated &&
+      state.cacheKey === cacheKey &&
+      (Date.now() - state.lastUpdated.getTime()) < MATCHES_CACHE_TTL;
+
+    if (!forceRefresh && isCacheValid) {
       console.log('Using cached matches data');
-      set({ isLoading: false }); // Ensure loading is false
+      set({ isLoading: false });
       return;
     }
-    
+
+    const requestId = ++latestDatesRequest;
     set({ isLoading: true, error: null });
-    try {
-      console.log('Fetching fresh matches data from API');
-      const response = await matchesApi.getFixtures();
-      console.log('API Response:', response); // Debug log
-      
-      // Handle direct array response from API
-      let fixturesArray;
-      if (Array.isArray(response)) {
-        // API returns direct array
-        fixturesArray = response;
-      } else if (response && response.fixtures && Array.isArray(response.fixtures)) {
-        // API returns object with fixtures property
-        fixturesArray = response.fixtures;
-      } else {
-        throw new Error('Invalid API response: no fixtures data found');
+
+    const results = await Promise.allSettled(dates.map((date) => matchesApi.getFixtures({ date })));
+    if (requestId !== latestDatesRequest) return; // a newer request replaced this one
+
+    const fixtures: any[] = [];
+    let failures = 0;
+    let firstError = '';
+    results.forEach((result) => {
+      if (result.status === 'rejected') {
+        failures++;
+        firstError = firstError || (result.reason?.message ?? 'Failed to fetch matches');
+        return;
       }
-      
-      const matches = fixturesArray.map(convertFixtureToMatch);
-      
-      set({
-        matches,
-        isLoading: false,
-        lastUpdated: new Date(),
-      });
-    } catch (error: any) {
-      console.error('Failed to fetch matches:', error);
-      set({
-        isLoading: false,
-        error: error.message || 'Failed to fetch matches',
-      });
+      const day = extractFixtures(result.value);
+      if (day) {
+        fixtures.push(...day);
+      } else {
+        failures++;
+        firstError = firstError || 'Invalid API response: no fixtures data found';
+      }
+    });
+
+    // Every day failed: nothing to show. Some days failed: show the others.
+    if (failures === dates.length) {
+      console.error('Failed to fetch matches:', firstError);
+      set({ isLoading: false, error: firstError || 'Failed to fetch matches' });
+      return;
     }
+    if (failures > 0) {
+      console.warn(`${failures}/${dates.length} days could not be loaded:`, firstError);
+    }
+
+    // A match can be returned by two neighbouring days: keep one copy
+    const unique = new Map<string, any>();
+    fixtures.forEach((fixture) => unique.set(fixture.id, fixture));
+    const matches = [...unique.values()]
+      .sort((a, b) => String(a.startTime ?? '').localeCompare(String(b.startTime ?? '')))
+      .map(convertFixtureToMatch);
+
+    set({
+      matches,
+      isLoading: false,
+      lastUpdated: failures > 0 ? null : new Date(), // partial answers are not cached
+      cacheKey: failures > 0 ? null : cacheKey,
+    });
   },
 
   fetchLiveMatches: async (forceRefresh = false) => {
     const state = get();
-    
+
     // Check cache validity (1 minute TTL for live matches - more frequent updates)
     const CACHE_TTL = 1 * 60 * 1000; // 1 minute
-    const isCacheValid = state.lastUpdated && 
+    const isCacheValid = state.lastUpdated &&
       (Date.now() - state.lastUpdated.getTime()) < CACHE_TTL;
-    
+
     // If cache is valid and we have data, don't fetch unless forced
     if (!forceRefresh && isCacheValid && state.liveMatches.length >= 0) {
       console.log('Using cached live matches data');
       return;
     }
-    
+
     try {
       console.log('Fetching fresh live matches data from API');
       const response = await matchesApi.getLiveFixtures();
       console.log('Live matches API Response:', response); // Debug log
-      
+
       // Handle direct array response from API
       let fixturesArray;
       if (Array.isArray(response)) {
@@ -158,12 +198,12 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
         });
         return;
       }
-      
+
       // Filter for live matches only
       const liveFixtures = fixturesArray.filter(isLiveFixture);
-      
+
       const liveMatches = liveFixtures.map(convertFixtureToMatch);
-      
+
       set({
         liveMatches,
         lastUpdated: new Date(),
@@ -176,40 +216,9 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
     }
   },
 
+  // One UTC day, always reloaded
   fetchMatchesByDate: async (date: string) => {
-    set({ isLoading: true, error: null });
-    try {
-      console.log('Fetching matches for date:', date);
-      // Use getFixtures with the specific date parameter
-      const response = await matchesApi.getFixtures({ date });
-      console.log('API Response for date:', response); // Debug log
-      
-      // Handle both direct array and object with fixtures property (same logic as fetchMatches)
-      let fixturesArray;
-      if (Array.isArray(response)) {
-        // API returns direct array
-        fixturesArray = response;
-      } else if (response && response.fixtures && Array.isArray(response.fixtures)) {
-        // API returns object with fixtures property
-        fixturesArray = response.fixtures;
-      } else {
-        throw new Error('Invalid API response: no fixtures data found');
-      }
-      
-      const matches = fixturesArray.map(convertFixtureToMatch);
-      
-      set({
-        matches,
-        isLoading: false,
-        lastUpdated: new Date(),
-      });
-    } catch (error: any) {
-      console.error('Failed to fetch matches by date:', error);
-      set({
-        isLoading: false,
-        error: error.message || 'Failed to fetch matches by date',
-      });
-    }
+    await get().fetchMatchesForDates([date], true);
   },
 
   fetchMatchesByTeam: async (teamId: string) => {
@@ -217,11 +226,12 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
     try {
       const response = await matchesApi.getTeamFixtures(teamId);
       const matches = response.fixtures.map(convertFixtureToMatch);
-      
+
       set({
         matches,
         isLoading: false,
         lastUpdated: new Date(),
+        cacheKey: null,
       });
     } catch (error: any) {
       console.error('Failed to fetch matches by team:', error);
@@ -237,11 +247,12 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
     try {
       const response = await matchesApi.getLeagueFixtures(leagueId);
       const matches = response.fixtures.map(convertFixtureToMatch);
-      
+
       set({
         matches,
         isLoading: false,
         lastUpdated: new Date(),
+        cacheKey: null,
       });
     } catch (error: any) {
       console.error('Failed to fetch matches by league:', error);
@@ -267,8 +278,7 @@ export const useMatchesStore = create<MatchesState>((set, get) => ({
   // Cache utilities
   isCacheValid: () => {
     const { lastUpdated } = get();
-    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    return !!(lastUpdated && (Date.now() - lastUpdated.getTime()) < CACHE_TTL);
+    return !!(lastUpdated && (Date.now() - lastUpdated.getTime()) < MATCHES_CACHE_TTL);
   },
 
   getCacheAge: () => {

@@ -8,14 +8,19 @@ import { useUserPreferences } from '@/hooks/use-user-preferences';
 import { useMatchesStore } from '@/lib/store/matches-store';
 import { useAuthStore } from '@/lib/store/auth-store';
 import MainNavbar from '@/components/navigation/main-navbar';
+import {
+  type DateFilter,
+  getDateKeyRange,
+  getUtcDatesCovering,
+  isInDateKeyRange,
+} from '@/lib/date-filters';
 
 // Mock data removed - now using real API data from matches store
 
 type MatchFilter = 'All' | 'Live' | 'Upcoming' | 'Finished' | 'Followed';
-type LeagueFilter = 'All' | 'Premier League' | 'La Liga' | 'Serie A' | 'Bundesliga' | 'Ligue 1';
-type DateFilter = 'All' | 'Today' | 'Tomorrow' | 'This Week' | 'Custom';
+type LeagueFilter = 'All' | 'Premier League' | 'La Liga' | 'Serie A' | 'Bundesliga' | 'Ligue 1' | 'Champions League' | 'Botola Pro';
 
-// Major European leagues configuration
+// Leagues covered by the API
 const MAJOR_LEAGUES = [
   { id: 'All', name: 'All Leagues', flag: '🌍' },
   { id: 'Premier League', name: 'Premier League', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
@@ -23,7 +28,13 @@ const MAJOR_LEAGUES = [
   { id: 'Serie A', name: 'Serie A', flag: '🇮🇹' },
   { id: 'Bundesliga', name: 'Bundesliga', flag: '🇩🇪' },
   { id: 'Ligue 1', name: 'Ligue 1', flag: '🇫🇷' },
-] as const; 
+  { id: 'Champions League', name: 'Champions League', flag: '🏆' },
+  { id: 'Botola Pro', name: 'Botola Pro', flag: '🇲🇦' },
+] as const;
+
+// The API names some competitions with their stage ("UEFA Champions League - League Phase")
+const toLeagueFilterId = (leagueName: string): string =>
+  leagueName.startsWith('UEFA Champions League') ? 'Champions League' : leagueName;
 
 export default function MatchesPage() {
   const router = useRouter();
@@ -49,97 +60,33 @@ export default function MatchesPage() {
     matches,
     isLoading,
     error,
-    fetchMatches,
-    fetchMatchesByDate,
+    fetchMatchesForDates,
     fetchLiveMatches,
     clearError,
     isCacheValid,
     getCacheAge
   } = useMatchesStore();
   
-  // Fetch matches on component mount with smart caching
+  // Local days shown by the active date filter
+  const dateRange = getDateKeyRange(activeDateFilter, customDate);
+
+  // Load the matches of the active date filter (one request per UTC day involved),
+  // with smart caching
   const fetchMatchesForActiveDate = async (forceRefresh = false) => {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    let targetDate: string;
-    
-    switch (activeDateFilter) {
-      case 'Today':
-        targetDate = today.toISOString().split('T')[0];
-        break;
-      case 'Tomorrow':
-        targetDate = tomorrow.toISOString().split('T')[0];
-        break;
-      case 'Custom':
-        if (customDate) {
-          targetDate = customDate;
-        } else {
-          targetDate = today.toISOString().split('T')[0];
-        }
-        break;
-      case 'This Week':
-      default:
-        // For 'This Week' and 'All', fetch today's matches and filter on frontend
-        // This is a limitation of the current backend API structure
-        targetDate = today.toISOString().split('T')[0];
-        break;
-    }
-    
-    // Use date-specific fetch for specific dates, general fetch for ranges
-    if (activeDateFilter === 'Today' || activeDateFilter === 'Tomorrow' || activeDateFilter === 'Custom') {
-      await fetchMatchesByDate(targetDate);
-    } else {
-      await fetchMatches(forceRefresh);
-    }
+    await fetchMatchesForDates(getUtcDatesCovering(dateRange), forceRefresh);
   };
-  
-  // Initial data fetch
+
+  // Fetch matches when the page opens and whenever the date filter changes.
+  // "Custom" only becomes active once a date is chosen, so it fetches too.
   useEffect(() => {
-    // Don't auto-fetch for Custom filter - wait for date selection
-    if (activeDateFilter !== 'Custom') {
-      fetchMatchesForActiveDate(); // Will use cache if valid, or fetch fresh data
-    }
-  }, [activeDateFilter]); // Re-fetch when date filter changes (except Custom)
-  
-  // Separate effect for custom date changes
-  useEffect(() => {
-    if (activeDateFilter === 'Custom' && customDate) {
-      fetchMatchesForActiveDate(); // Fetch when custom date is actually selected
-    }
-  }, [customDate]); // Only re-fetch when custom date changes
+    fetchMatchesForActiveDate(); // Will use cache if valid, or fetch fresh data
+  }, [activeDateFilter, customDate]);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchLiveMatches();
     }
   }, [isAuthenticated, fetchLiveMatches]);
-
-  // Helper function to check if a date matches the selected date filter
-  const matchesDateFilter = (matchDate: string) => {
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const weekFromNow = new Date(today);
-    weekFromNow.setDate(weekFromNow.getDate() + 7);
-    
-    const matchDateObj = new Date(matchDate);
-    
-    switch (activeDateFilter) {
-      case 'Today':
-        return matchDateObj.toDateString() === today.toDateString();
-      case 'Tomorrow':
-        return matchDateObj.toDateString() === tomorrow.toDateString();
-      case 'This Week':
-        return matchDateObj >= today && matchDateObj <= weekFromNow;
-      case 'Custom':
-        if (!customDate) return true;
-        return matchDateObj.toDateString() === new Date(customDate).toDateString();
-      default:
-        return true;
-    }
-  };
 
   // Filter matches based on user preferences and all active filters
   const getFilteredMatches = () => {
@@ -167,19 +114,21 @@ export default function MatchesPage() {
 
     // Apply league filter
     if (activeLeague !== 'All') {
-      filtered = filtered.filter(match => match.league === activeLeague);
+      filtered = filtered.filter(match => toLeagueFilterId(match.league) === activeLeague);
     }
 
-    // Apply date filter
-    if (activeDateFilter !== 'All') {
-      filtered = filtered.filter(match => matchesDateFilter(match.date));
-    }
+    // Apply date filter: keep the matches kicking off on the selected local days
+    filtered = filtered.filter(match => isInDateKeyRange(match.startTime, match.date, dateRange));
 
     return filtered.sort((a, b) => {
       if (a.isFollowed && !b.isFollowed) return -1;
       if (!a.isFollowed && b.isFollowed) return 1;
       const statusPriority = { live: 3, upcoming: 2, finished: 1 };
-      return statusPriority[b.status] - statusPriority[a.status];
+      if (statusPriority[b.status] !== statusPriority[a.status]) {
+        return statusPriority[b.status] - statusPriority[a.status];
+      }
+      // Same status: chronological order
+      return String(a.startTime ?? a.date).localeCompare(String(b.startTime ?? b.date));
     });
   };
 
@@ -510,7 +459,9 @@ export default function MatchesPage() {
                   <p className="text-white/50 text-sm">
                     {activeFilter === 'Followed' && !hasSelectedTeams
                       ? 'Select your favorite teams in settings to see followed matches'
-                      : `No ${activeFilter.toLowerCase()} matches available`}
+                      : activeFilter === 'All'
+                        ? 'No matches available for this selection'
+                        : `No ${activeFilter.toLowerCase()} matches available for this selection`}
                   </p>
                 </div>
               </div>
